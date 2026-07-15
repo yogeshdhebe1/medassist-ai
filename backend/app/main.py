@@ -6,6 +6,7 @@ from app.core.exceptions import AppException, app_exception_handler
 from app.modules.authentication.router import router as auth_router
 from app.modules.patients.router import router as patients_router
 from app.modules.doctors.router import router as doctors_router
+from app.modules.ai_apis.router import router as ai_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -26,6 +27,7 @@ app.add_exception_handler(AppException, app_exception_handler)
 app.include_router(auth_router, prefix="/v1")
 app.include_router(patients_router, prefix="/v1")
 app.include_router(doctors_router, prefix="/v1")
+app.include_router(ai_router, prefix="/v1")
 
 
 @app.get("/health", tags=["Health"])
@@ -34,5 +36,5 @@ def health_check():
 
 
 # Remaining modules (users, appointments, medical_reports, prescriptions,
-# notifications, chat, ai_apis, analytics, file_upload, settings) will each
+# notifications, chat, analytics, file_upload, settings) will each
 # register their own router here, following the same pattern as above.

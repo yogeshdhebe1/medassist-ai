@@ -1,0 +1,47 @@
+import uuid
+
+from sqlalchemy.orm import Session
+
+from app.modules.ai_apis.inference import predict_diabetes
+from app.modules.ai_apis.repository import AIPredictionRepository
+from app.modules.ai_apis.schemas import DiabetesPredictionRequest
+from app.modules.patients.repository import PatientRepository
+
+
+class AIPredictionService:
+    def __init__(self, db: Session):
+        self.repo = AIPredictionRepository(db)
+        self.patient_repo = PatientRepository(db)
+
+    def predict_diabetes_risk(self, user_id: uuid.UUID, payload: DiabetesPredictionRequest):
+        # Lazily create the patient profile if this is their first-ever interaction,
+        # consistent with the pattern used in the patients module.
+        patient = self.patient_repo.get_by_user_id(user_id)
+        if not patient:
+            patient = self.patient_repo.create(user_id)
+
+        result = predict_diabetes(**payload.model_dump())
+
+        record = self.repo.create(
+            patient_id=patient.id,
+            prediction_type="diabetes",
+            input_data=payload.model_dump(),
+            output_result=result,
+            confidence_score=result["probability"],
+            model_version=result["model_version"],
+        )
+
+        return {
+            "prediction_id": record.id,
+            "risk_level": result["risk_level"],
+            "probability": result["probability"],
+            "contributing_factors": result["contributing_factors"],
+            "model_version": result["model_version"],
+            "created_at": record.created_at,
+        }
+
+    def get_history(self, user_id: uuid.UUID, prediction_type: str | None, page: int, page_size: int):
+        patient = self.patient_repo.get_by_user_id(user_id)
+        if not patient:
+            return []
+        return self.repo.list_for_patient(patient.id, prediction_type, page, page_size)

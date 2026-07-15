@@ -10,3 +10,8 @@ python-jose[cryptography]==3.3.0
 passlib[argon2]==1.7.4
 python-multipart==0.0.12
 python-dotenv==1.0.1
+
+# AI/ML - diabetes prediction model
+scikit-learn==1.5.2
+pandas==2.2.3
+joblib==1.4.2
