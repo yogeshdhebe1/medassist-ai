@@ -27,6 +27,16 @@ class DuplicateUserError(AppException):
         super().__init__(409, "USER_EXISTS", "An account with this email or phone already exists")
 
 
+class ForbiddenError(AppException):
+    def __init__(self, message: str = "You do not have permission to perform this action"):
+        super().__init__(403, "FORBIDDEN", message)
+
+
+class NotFoundError(AppException):
+    def __init__(self, message: str = "Resource not found"):
+        super().__init__(404, "NOT_FOUND", message)
+
+
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,

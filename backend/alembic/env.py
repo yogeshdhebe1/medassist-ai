@@ -8,8 +8,8 @@ from app.db.base import Base
 
 # Import all module models here so Alembic's autogenerate can detect them.
 from app.modules.authentication.models import User  # noqa: F401
-# from app.modules.patients.models import Patient  # noqa: F401  (add as modules are built)
-# from app.modules.doctors.models import Doctor  # noqa: F401
+from app.modules.patients.models import Patient  # noqa: F401
+# from app.modules.doctors.models import Doctor  # noqa: F401  (add as modules are built)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
