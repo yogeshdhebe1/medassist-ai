@@ -1,111 +1,47 @@
-# Diabetes Prediction ML Module — Update Package
+# Appointments Module — Update Package
 
-This adds your **first real ML-powered feature** to the platform: a trained model that predicts diabetes risk from clinical inputs, served through the backend API.
-
-## What's included
-
-### 1. `ai-training/diabetes_prediction/` — the offline training pipeline
-This is the part you'd show in an interview to prove you understand the ML side, not just calling a pre-made API:
-- `dataset/pima_diabetes.csv` — the Pima Indians Diabetes dataset (768 patient records, 8 clinical features)
-- `training/train.py` — trains a `RandomForestClassifier`, evaluates it, saves the model
-- `evaluation/metrics.json` — the actual metrics from training (accuracy, precision, recall, F1, ROC-AUC, feature importance)
-
-**Model performance achieved:**
-| Metric | Value |
-|---|---|
-| Accuracy | 72.1% |
-| Precision | 58.5% |
-| Recall | 70.4% |
-| F1 Score | 63.9% |
-| **ROC-AUC** | **82.0%** |
-
-ROC-AUC is the metric that matters most here — 0.82 means the model is quite good at ranking higher-risk patients above lower-risk ones, which is what a screening tool needs to do.
-
-**Top predictive features** (from the model itself): glucose (35%), BMI (18%), age (13%), insulin (10%) — this matches real clinical knowledge about diabetes risk factors, which is a good thing to mention if asked about it.
-
-### 2. `backend/app/modules/ai_apis/` — the backend integration
-Follows the exact same clean architecture pattern as `patients` and `doctors`:
-- `models.py` — `AIPrediction` table (generic, reused for every future AI module — diabetes, heart disease, stroke, etc. all use `prediction_type` to discriminate, per the Database Design doc)
-- `schemas.py` — request validation (clinically plausible ranges for every input) and response shape
-- `inference.py` — loads the trained `.joblib` model and runs predictions
-- `repository.py`, `services.py`, `router.py` — same layering as every other module
-
-### 3. `backend/ai_models/diabetes_prediction/model/diabetes_model.joblib`
-The actual trained model file (975 KB) — this is the artifact `inference.py` loads at request time.
+Connects patients and doctors through a bookable appointment flow, and — the interesting design detail — **confirming an appointment automatically creates the doctor↔patient assignment** used by the RBAC checks in the `doctors` module. This means in the real product flow, a doctor doesn't need a separate manual "assign" step (that endpoint was only a dev/testing shortcut) — booking and confirming an appointment is what naturally grants a doctor access to a patient's records.
 
 ## New endpoints
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/ai/disease-prediction/diabetes` | Bearer (role: patient) | Run a diabetes risk prediction |
-| GET | `/v1/ai/predictions/history` | Bearer (role: patient) | View your past AI predictions |
+| POST | `/v1/appointments` | Bearer (role: patient) | Book an appointment with a doctor (must be a future date/time) |
+| GET | `/v1/appointments` | Bearer (role: patient or doctor) | List your own appointments (patients see their bookings, doctors see appointments booked with them) |
+| PATCH | `/v1/appointments/{appointment_id}/status` | Bearer (role: patient or doctor) | Update status: `pending → confirmed → completed`, or `cancelled` |
 
-## How to apply this update
+## How to apply
 
-1. Copy `backend/` folder content into your existing repo's `backend/`, overwriting `app/main.py`, `alembic/env.py`, `requirements/base.txt`, and adding the new `app/modules/ai_apis/` and `ai_models/` folders.
-2. (Optional but recommended) Also copy the `ai-training/` folder to your **repo root** (not inside `backend/`) — this is what you'll point to in your resume/portfolio as "the ML training pipeline."
-3. Install the new ML dependencies:
+1. Copy `backend/` content into your repo's `backend/`, overwriting `app/main.py` and `alembic/env.py`, adding the new `app/modules/appointments/` folder.
+2. Migrate:
    ```powershell
    cd backend
    venv\Scripts\activate
-   pip install -r requirements\base.txt
-   ```
-4. Run the migration:
-   ```powershell
-   alembic revision --autogenerate -m "add ai_predictions table"
+   alembic revision --autogenerate -m "create appointments table"
    alembic upgrade head
-   ```
-5. Restart the server:
-   ```powershell
    uvicorn app.main:app --reload
    ```
 
-## How to test in Swagger UI (`/docs`)
+## How to test in Swagger UI
 
-1. Login as your patient user, Authorize with the token.
-2. `POST /v1/ai/disease-prediction/diabetes` → "Try it out":
+1. **As patient**: `POST /v1/appointments`
    ```json
    {
-     "pregnancies": 6,
-     "glucose": 180,
-     "blood_pressure": 95,
-     "skin_thickness": 35,
-     "insulin": 200,
-     "bmi": 38.5,
-     "diabetes_pedigree": 1.2,
-     "age": 55
+     "doctor_id": "a02e0fce-bfa7-495b-b87a-5894df309bd0",
+     "scheduled_at": "2026-08-01T10:00:00Z",
+     "reason": "Annual checkup"
    }
    ```
-   Expected: `"risk_level": "high"`, probability ~0.82, with contributing factors listed.
-3. Try a low-risk profile for contrast:
-   ```json
-   {
-     "pregnancies": 0,
-     "glucose": 85,
-     "blood_pressure": 65,
-     "skin_thickness": 20,
-     "insulin": 80,
-     "bmi": 21.0,
-     "diabetes_pedigree": 0.2,
-     "age": 25
-   }
-   ```
-   Expected: `"risk_level": "low"`, probability ~0.04.
-4. `GET /v1/ai/predictions/history` → should show both predictions you just made.
+   (use your doctor's `id` from `GET /v1/doctors/me`, and any future date)
+2. Try a **past date** → should get a 422 validation error (proves the future-date check works).
+3. **As patient**: `GET /v1/appointments` → your new appointment should appear with `"status": "pending"`.
+4. **Switch to doctor token** (Authorize with the doctor's token): `GET /v1/appointments` → the same appointment should appear here too.
+5. **As doctor**: `PATCH /v1/appointments/{appointment_id}/status` with `{"status": "confirmed"}`.
+6. **The interesting part** — now test the RBAC connection: if this doctor was *not* already assigned to this patient (fresh test patient), `GET /v1/doctors/me/patients` should now show them, and `POST /v1/doctors/me/patient-notes` for this patient should succeed — proving the appointment confirmation granted the access automatically.
+7. Try a **random appointment_id** (someone else's) with a **different doctor's token** → should get 403/404, proving a doctor can't update an appointment that isn't theirs.
 
-## How you can retrain the model yourself (to prove you understand it)
+## Design notes
 
-```powershell
-cd ai-training\diabetes_prediction\training
-pip install scikit-learn pandas joblib
-python train.py
-```
-This regenerates `diabetes_model.joblib` and `metrics.json` from scratch — useful to demonstrate in an interview that you can actually reproduce the training, not just that a file exists.
-
-## Design notes (useful for interview/resume talking points)
-
-- **Why RandomForest and not deep learning**: for small tabular datasets (768 rows, 8 features) like this one, tree-based models like Random Forest reliably outperform neural networks, train in seconds without a GPU, and give free feature-importance explainability — which matters for a healthcare use case where "why did the model say this" is a real requirement, not a nice-to-have.
-- **Zero-value imputation**: the raw dataset encodes missing values as `0` for fields where 0 is medically impossible (glucose, blood pressure, BMI, etc.). The training script treats these as missing and imputes the column median — this is a real data-quality issue you had to handle, not just "load CSV and fit model."
-- **Class imbalance handling**: the dataset is ~65% non-diabetic / 35% diabetic. `class_weight="balanced"` compensates so the model doesn't just learn to always predict "not diabetic."
-- **Explainability**: contributing factors are derived from clinically-meaningful thresholds (glucose ≥140, BMI ≥30, etc.) rather than raw SHAP values, keeping the explanation simple and clinically interpretable for a patient-facing UI, per the AI Pipeline doc's emphasis on explainability.
-- **Every prediction is persisted** (`ai_predictions` table) with the exact input, output, and model version — full traceability, matching the audit requirements in the Security Architecture doc.
+- **Status transitions aren't state-machine-enforced here** (e.g. nothing stops going `completed → pending`) — for a resume-scope project this is an acceptable simplification; a production version would validate legal transitions per the state defined in the SRS.
+- **Auto-assignment on confirm** is the key design decision worth mentioning in an interview: it means the RBAC relationship (`DoctorPatientAssignment`) is a side effect of a real clinical workflow event (confirming a booking) rather than an arbitrary admin action — this is closer to how the actual product would work.
+- Both patient and doctor can update status (e.g. patient cancels, doctor confirms) — the service layer's `_load_and_authorize` ensures whoever calls it can only act on appointments where they are a participant.
