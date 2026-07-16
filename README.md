@@ -1,85 +1,83 @@
-# Final 3 Modules — Users, Settings, Chat
+# Heart Disease Prediction — Update Package
 
-This update completes **all 13 originally planned backend modules**. `users` and `settings` add no new database tables of significant complexity; `chat` adds two new tables (`chat_sessions`, `chat_messages`).
+Adds your **second real ML model**: heart disease risk prediction, trained on the UCI Cleveland Heart Disease dataset.
 
----
+## ⚠️ Important — a real debugging story worth mentioning in interviews
 
-## 1. Users (Admin) — `/v1/admin/users`
+While building this, the model initially predicted **backwards** — a clearly high-risk clinical profile (blocked arteries, exercise-induced chest pain, low max heart rate) came back as "low risk," and vice versa. Investigation showed the specific CSV mirror used has an **inverted `target` label**: patients labeled `target=1` actually had *fewer* risk markers (lower vessel blockage count, less exercise angina, higher max heart rate) than those labeled `0` — the opposite of what the column name implies. This is a known quirk of one popular circulated copy of this dataset.
 
-Admin-facing user management, separate from the auth-flow-specific `UserRepository` in the `authentication` module.
+**Fix**: the label is flipped (`target = 1 - target`) before training, so `1` consistently means "higher heart disease risk" — verified by checking group means (`df.groupby('target')[[...]].mean()`) before and after the fix, and by testing the trained model against a clearly high-risk and clearly low-risk synthetic profile until the direction was correct.
+
+**This is a legitimately good story for a resume/interview**: it shows you don't just trust a dataset blindly — you validate that a model's predictions make clinical sense before shipping it, and you know how to debug a "the model works but gives backwards answers" bug (a much sneakier class of bug than a crash, since the code runs fine and produces plausible-looking, professionally-formatted results — you have to know the domain to catch it).
+
+## Model performance (after the label fix)
+
+| Metric | Value |
+|---|---|
+| Accuracy | 82.0% |
+| Precision | 84.0% |
+| Recall | 75.0% |
+| F1 Score | 79.3% |
+| **ROC-AUC** | **90.9%** |
+
+Top predictive features: `thal` (thalassemia type), `cp` (chest pain type), `thalach` (max heart rate), `ca` (blocked vessel count) — all clinically well-established heart disease risk indicators.
+
+## What's included
+
+- `ai-training/heart_disease_prediction/` — dataset, `train.py` (with the label-fix documented in the docstring), `metrics.json`
+- `backend/ai_models/heart_disease_prediction/model/heart_disease_model.joblib` — the trained model artifact
+- `backend/app/modules/ai_apis/`:
+  - `inference_heart.py` — **new file**, loads and runs the heart disease model
+  - `schemas.py` — **overwrite**: now contains both diabetes AND heart disease request/response schemas
+  - `services.py` — **overwrite**: refactored with a shared `_persist_and_format()` helper used by both diabetes and heart disease (reduces duplication now that there are 2+ disease models)
+  - `router.py` — **overwrite**: adds `POST /v1/ai/disease-prediction/heart-disease`
+
+## New endpoint
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/v1/admin/users` | Bearer (role: admin) | List/search/filter all users (`?role=`, `?is_active=`, `?search=`) |
-| PATCH | `/v1/admin/users/{user_id}/status` | Bearer (role: admin) | Activate/deactivate a user account |
-
-**Notable guardrail**: an admin cannot deactivate their own account via this endpoint (`SelfLockoutError`, 400) — a real safety concern worth having for any admin-management feature, and a good detail to mention if asked about edge cases you considered.
-
-## 2. Settings — `/v1/settings`
-
-Per-user preferences (notifications, language, theme), same lazy-creation pattern as `patients`/`doctors` profiles.
-
-| Method | Route | Auth | Description |
-|---|---|---|---|
-| GET | `/v1/settings/me` | Bearer (any role) | Get your settings (auto-creates defaults on first call) |
-| PUT | `/v1/settings/me` | Bearer (any role) | Update settings (partial updates supported) |
-
-## 3. Chat (AI Health Chatbot) — `/v1/chat`
-
-| Method | Route | Auth | Description |
-|---|---|---|---|
-| POST | `/v1/chat/sessions` | Bearer (role: patient) | Start a new chat session |
-| POST | `/v1/chat/sessions/{session_id}/messages` | Bearer (owner patient) | Send a message, get a reply |
-| GET | `/v1/chat/sessions/{session_id}/messages` | Bearer (owner patient) | View message history |
-
-**Important honesty point for your resume/interview**: this chatbot is **keyword-matching, not a real LLM/RAG pipeline**. The AI Pipeline doc describes the "real" version as FAISS retrieval + an LLM — that requires external API keys and a vector database, which is out of scope for a resume project without ongoing hosting costs. What's built here is deliberately structured so that swapping in real RAG later only touches `bot_engine.py`'s `generate_reply()` function — sessions, message persistence, and the API contract don't change. **Be upfront about this distinction if asked** — claiming a keyword-matcher is "AI-powered NLP" would be a credibility risk in an interview; describing it accurately as "a rule-based chatbot architected to be RAG-upgradeable" is honest and still shows good design thinking.
+| POST | `/v1/ai/disease-prediction/heart-disease` | Bearer (role: patient) | Run a heart disease risk prediction |
 
 ## How to apply
 
-1. Copy `backend/app/modules/{users,settings,chat}/` into your repo, overwrite `app/main.py` and `alembic/env.py`.
-2. Migrate:
+1. Copy `backend/ai_models/heart_disease_prediction/` into your repo's `backend/ai_models/`.
+2. In `backend/app/modules/ai_apis/`: add the new `inference_heart.py`, **overwrite** `schemas.py`, `services.py`, and `router.py` with the versions in this zip.
+3. No new database table needed (reuses the existing generic `ai_predictions` table with `prediction_type="heart_disease"`) — **no migration required**.
+4. Restart:
    ```powershell
-   cd backend
-   venv\Scripts\activate
-   alembic revision --autogenerate -m "add settings, chat, and finalize users module"
-   alembic upgrade head
    uvicorn app.main:app --reload
    ```
 
 ## How to test in Swagger UI
 
-**Users (admin)**:
-1. As admin: `GET /v1/admin/users` → should list all your test users (patient, doctor, admin).
-2. Try `PATCH /v1/admin/users/{your_own_admin_user_id}/status` with `{"is_active": false}` → should get 400 `SELF_LOCKOUT`.
-3. Try it on a different user's ID → should succeed.
+**High-risk profile** (should return `"risk_level": "high"`, probability ~0.94):
+```json
+{
+  "age": 65, "sex": 1, "cp": 0, "trestbps": 160, "chol": 280,
+  "fbs": 1, "restecg": 1, "thalach": 110, "exang": 1,
+  "oldpeak": 3.5, "slope": 1, "ca": 3, "thal": 3
+}
+```
 
-**Settings**:
-1. As any logged-in user: `GET /v1/settings/me` → defaults auto-created.
-2. `PUT /v1/settings/me` with `{"theme": "dark", "language": "hi"}` → partial update, other fields unchanged.
+**Low-risk profile** (should return `"risk_level": "low"`, probability ~0.09):
+```json
+{
+  "age": 35, "sex": 0, "cp": 2, "trestbps": 110, "chol": 180,
+  "fbs": 0, "restecg": 0, "thalach": 180, "exang": 0,
+  "oldpeak": 0.2, "slope": 2, "ca": 0, "thal": 1
+}
+```
 
-**Chat**:
-1. As patient: `POST /v1/chat/sessions` → get a `session_id`.
-2. `POST /v1/chat/sessions/{session_id}/messages` with `{"message": "I have a fever, what should I do?"}` → should get a relevant canned reply + disclaimer.
-3. Try `{"message": "tell me about diabetes"}` → different, topic-relevant reply.
-4. `GET /v1/chat/sessions/{session_id}/messages` → both your message and the bot's replies should appear, in order.
-5. **RBAC test**: try accessing someone else's `session_id` → 403.
+Then `GET /v1/ai/predictions/history?prediction_type=heart_disease` — should show both predictions.
 
----
+## Field reference (for filling out test requests)
 
-## 🎉 All 13 backend modules complete
-
-| # | Module | 
-|---|---|
-| 1 | Authentication |
-| 2 | Users (Admin) |
-| 3 | Patients |
-| 4 | Doctors |
-| 5 | Appointments |
-| 6 | Medical Reports |
-| 7 | Prescriptions |
-| 8 | Notifications |
-| 9 | Chat |
-| 10 | AI APIs (Diabetes Prediction) |
-| 11 | Analytics |
-| 12 | File Upload (covered within Medical Reports) |
-| 13 | Settings |
+| Field | Meaning | Range |
+|---|---|---|
+| `cp` | Chest pain type | 0=typical angina, 1=atypical angina, 2=non-anginal pain, 3=asymptomatic |
+| `fbs` | Fasting blood sugar > 120 mg/dl | 0=no, 1=yes |
+| `restecg` | Resting ECG result | 0=normal, 1=ST-T abnormality, 2=LV hypertrophy |
+| `exang` | Exercise-induced angina | 0=no, 1=yes |
+| `slope` | Slope of peak exercise ST segment | 0=upsloping, 1=flat, 2=downsloping |
+| `ca` | Major vessels colored by fluoroscopy | 0-4 |
+| `thal` | Thalassemia | 1=normal, 2=fixed defect, 3=reversible defect |

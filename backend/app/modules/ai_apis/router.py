@@ -7,6 +7,8 @@ from app.modules.authentication.models import User
 from app.modules.ai_apis.schemas import (
     DiabetesPredictionRequest,
     DiabetesPredictionResponse,
+    HeartDiseasePredictionRequest,
+    HeartDiseasePredictionResponse,
     PredictionHistoryItem,
 )
 from app.modules.ai_apis.services import AIPredictionService
@@ -22,6 +24,16 @@ def predict_diabetes(
 ):
     service = AIPredictionService(db)
     return service.predict_diabetes_risk(current_user.id, payload)
+
+
+@router.post("/disease-prediction/heart-disease", response_model=HeartDiseasePredictionResponse)
+def predict_heart_disease(
+    payload: HeartDiseasePredictionRequest,
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+):
+    service = AIPredictionService(db)
+    return service.predict_heart_disease_risk(current_user.id, payload)
 
 
 @router.get("/predictions/history", response_model=list[PredictionHistoryItem])
