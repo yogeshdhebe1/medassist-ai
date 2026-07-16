@@ -1,46 +1,53 @@
-# Prescriptions Module — Update Package
+# Notifications Module — Update Package
 
-Lets an assigned doctor write a prescription (list of medications + notes) for a patient, and lets the patient (or the assigned doctor) view them. Reuses the same RBAC pattern as `patient_notes` in the doctors module.
+Adds in-app notifications, plus something more interesting: a reusable `NotificationService.notify()` helper that **other modules call as a side effect of their own actions** — this is the first bit of cross-module, event-driven behavior in the codebase (previously every module only touched its own data).
+
+## What's new
+
+- `app/modules/notifications/` — full module (model, schemas, repository, service, router)
+- `app/modules/appointments/services.py` — **modified**: now sends a notification to the doctor when a patient books, and to the patient when the doctor confirms
+- `app/modules/prescriptions/services.py` — **modified**: now sends a notification to the patient when a doctor issues a prescription
+- `app/main.py`, `alembic/env.py` — **modified**: register the new router/model
 
 ## New endpoints
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/prescriptions` | Bearer (role: doctor) | Create a prescription — fails 403 if not assigned to the patient |
-| GET | `/v1/prescriptions/me` | Bearer (role: patient) | View your own prescriptions |
-| GET | `/v1/prescriptions/patient/{patient_id}` | Bearer (patient owner or assigned doctor) | View a specific patient's prescriptions |
+| GET | `/v1/notifications` | Bearer (any role) | List your notifications (supports `?unread_only=true`) |
+| GET | `/v1/notifications/unread-count` | Bearer (any role) | Get just the unread count (for a UI badge) |
+| PATCH | `/v1/notifications/{notification_id}/read` | Bearer (owner only) | Mark a notification as read |
 
 ## How to apply
 
-1. Copy `backend/` content into your repo's `backend/`, overwriting `app/main.py` and `alembic/env.py`, adding `app/modules/prescriptions/`.
+1. Copy `backend/` content into your repo's `backend/`:
+   - Add the new `app/modules/notifications/` folder
+   - **Overwrite** `app/modules/appointments/services.py` and `app/modules/prescriptions/services.py` (these now call the notification service)
+   - Overwrite `app/main.py` and `alembic/env.py`
 2. Migrate:
    ```powershell
    cd backend
    venv\Scripts\activate
-   alembic revision --autogenerate -m "create prescriptions table"
+   alembic revision --autogenerate -m "create notifications table"
    alembic upgrade head
    uvicorn app.main:app --reload
    ```
 
 ## How to test in Swagger UI
 
-1. **As doctor** (must already be assigned to the patient — e.g. via the appointments confirm flow): `POST /v1/prescriptions`
-   ```json
-   {
-     "patient_id": "b700d2ee-9340-4c24-b7b6-51efeb4f9c72",
-     "medications": [
-       { "name": "Metformin", "dosage": "500mg", "frequency": "twice daily", "duration_days": 30 },
-       { "name": "Atorvastatin", "dosage": "10mg", "frequency": "once daily", "duration_days": 90 }
-     ],
-     "notes": "Take Metformin with food. Follow up in 4 weeks."
-   }
-   ```
-   Expect **201**.
-2. Try the same request with `"medications": []` → expect **422** (proves the "at least one medication" validation works).
-3. **As patient**: `GET /v1/prescriptions/me` → the prescription should appear.
-4. **RBAC test**: try `POST /v1/prescriptions` as the doctor for a **random/unassigned** `patient_id` → expect **403/404**.
+The easiest way to test this is to **re-run actions from earlier modules** and watch notifications appear as a side effect:
+
+1. **As patient**: book a new appointment (`POST /v1/appointments`) with any doctor.
+2. **Switch to doctor token**: `GET /v1/notifications` → you should see a `"appointment_requested"` notification.
+3. **As doctor**: confirm that appointment (`PATCH /v1/appointments/{id}/status` → `"confirmed"`).
+4. **Switch to patient token**: `GET /v1/notifications` → you should see a `"appointment_confirmed"` notification.
+5. **As doctor**: issue a prescription for that patient (`POST /v1/prescriptions`).
+6. **As patient**: `GET /v1/notifications` → a `"prescription_issued"` notification should now also appear.
+7. `GET /v1/notifications/unread-count` → should show the count of unread notifications.
+8. `PATCH /v1/notifications/{notification_id}/read` on one of them → then check `unread-count` again, it should have decreased by 1.
+9. **RBAC test**: try marking a notification that belongs to a *different* user (copy an ID from the other role's list) → should get 403.
 
 ## Design notes
 
-- **`medications` as JSON, not a separate table**: per the Database Design doc's rationale, a prescription's medication list is a variable-length, self-contained unit that's always read/written together with its parent prescription — a separate `medication_items` table with foreign keys would add join complexity with no real query benefit here. `MedicationItem` is still a proper Pydantic model though, so the API still validates and documents its structure precisely (Swagger shows the full nested schema).
-- **Same RBAC dependency as patient_notes**: `create_prescription` reuses `doctor_repo.is_assigned(...)` — the exact same check used for patient notes — so a doctor's prescribing rights are governed by the same single assignment relationship as everything else, not a separate permission system.
+- **`notify()` as a cross-module contract**: rather than each module writing directly to the `notifications` table, they all go through `NotificationService.notify(user_id, title, body, type)`. This is the same principle as the `_assert_assigned` RBAC check being centralized in one place — one method owns "how a notification gets created," so if you later swap this for real push notifications (FCM) or email, there's exactly one place to change.
+- **This is the first genuinely cross-module dependency** in the codebase (`appointments` and `prescriptions` now import from `notifications`). It's worth being able to explain in an interview why this doesn't create a circular import problem: `notifications` doesn't import anything from `appointments` or `prescriptions` — dependencies only flow one direction.
+- **`type` field is a free-form string** (not an enum) deliberately — new notification types (e.g. `report_analyzed` once the OCR module exists, `medicine_reminder`) can be added by any future module without a schema migration.

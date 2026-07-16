@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.modules.doctors.repository import DoctorRepository
+from app.modules.notifications.services import NotificationService
 from app.modules.patients.repository import PatientRepository
 from app.modules.prescriptions.models import Prescription
 from app.modules.prescriptions.repository import PrescriptionRepository
@@ -15,6 +16,7 @@ class PrescriptionService:
         self.repo = PrescriptionRepository(db)
         self.patient_repo = PatientRepository(db)
         self.doctor_repo = DoctorRepository(db)
+        self.notification_service = NotificationService(db)
 
     def create_prescription(self, doctor_user_id: uuid.UUID, payload: PrescriptionCreateRequest) -> Prescription:
         doctor = self.doctor_repo.get_by_user_id(doctor_user_id)
@@ -29,7 +31,15 @@ class PrescriptionService:
             raise ForbiddenError("You are not assigned to this patient")
 
         medications_dicts = [m.model_dump() for m in payload.medications]
-        return self.repo.create(patient.id, doctor.id, medications_dicts, payload.notes)
+        prescription = self.repo.create(patient.id, doctor.id, medications_dicts, payload.notes)
+
+        self.notification_service.notify(
+            user_id=patient.user_id,
+            title="New prescription",
+            body=f"Your doctor has issued a new prescription with {len(medications_dicts)} medication(s).",
+            type="prescription_issued",
+        )
+        return prescription
 
     def list_for_patient(self, patient_id: uuid.UUID, user_id: uuid.UUID, role: str, page: int, page_size: int) -> list[Prescription]:
         if role == "patient":

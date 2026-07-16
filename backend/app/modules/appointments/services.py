@@ -7,6 +7,7 @@ from app.modules.appointments.models import Appointment, AppointmentStatus
 from app.modules.appointments.repository import AppointmentRepository
 from app.modules.appointments.schemas import AppointmentCreateRequest
 from app.modules.doctors.repository import DoctorRepository
+from app.modules.notifications.services import NotificationService
 from app.modules.patients.repository import PatientRepository
 
 
@@ -15,6 +16,7 @@ class AppointmentService:
         self.repo = AppointmentRepository(db)
         self.patient_repo = PatientRepository(db)
         self.doctor_repo = DoctorRepository(db)
+        self.notification_service = NotificationService(db)
 
     def book_appointment(self, patient_user_id: uuid.UUID, payload: AppointmentCreateRequest) -> Appointment:
         patient = self.patient_repo.get_by_user_id(patient_user_id)
@@ -25,7 +27,16 @@ class AppointmentService:
         if not doctor:
             raise NotFoundError("Doctor not found")
 
-        return self.repo.create(patient.id, doctor.id, payload.scheduled_at, payload.reason)
+        appointment = self.repo.create(patient.id, doctor.id, payload.scheduled_at, payload.reason)
+
+        # Notify the doctor a new booking is awaiting their confirmation.
+        self.notification_service.notify(
+            user_id=doctor.user_id,
+            title="New appointment request",
+            body=f"A patient has requested an appointment on {payload.scheduled_at.strftime('%Y-%m-%d %H:%M')}.",
+            type="appointment_requested",
+        )
+        return appointment
 
     def _load_and_authorize(self, appointment_id: uuid.UUID, user_id: uuid.UUID, role: str) -> Appointment:
         appointment = self.repo.get_by_id(appointment_id)
@@ -55,6 +66,15 @@ class AppointmentService:
         if status_enum == AppointmentStatus.confirmed:
             if not self.doctor_repo.is_assigned(updated.doctor_id, updated.patient_id):
                 self.doctor_repo.assign_patient(updated.doctor_id, updated.patient_id)
+
+            patient = self.patient_repo.get_by_id(updated.patient_id)
+            if patient:
+                self.notification_service.notify(
+                    user_id=patient.user_id,
+                    title="Appointment confirmed",
+                    body=f"Your appointment on {updated.scheduled_at.strftime('%Y-%m-%d %H:%M')} has been confirmed.",
+                    type="appointment_confirmed",
+                )
 
         return updated
 
