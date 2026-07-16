@@ -9,6 +9,7 @@ from app.modules.doctors.router import router as doctors_router
 from app.modules.ai_apis.router import router as ai_router
 from app.modules.appointments.router import router as appointments_router
 from app.modules.medical_reports.router import router as reports_router
+from app.modules.prescriptions.router import router as prescriptions_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -32,6 +33,7 @@ app.include_router(doctors_router, prefix="/v1")
 app.include_router(ai_router, prefix="/v1")
 app.include_router(appointments_router, prefix="/v1")
 app.include_router(reports_router, prefix="/v1")
+app.include_router(prescriptions_router, prefix="/v1")
 
 
 @app.get("/health", tags=["Health"])
@@ -39,6 +41,6 @@ def health_check():
     return {"status": "ok", "service": settings.APP_NAME, "environment": settings.ENVIRONMENT}
 
 
-# Remaining modules (users, prescriptions, notifications, chat,
-# analytics, file_upload, settings) will each register their own
+# Remaining modules (users, notifications, chat, analytics,
+# file_upload, settings) will each register their own
 # router here, following the same pattern as above.

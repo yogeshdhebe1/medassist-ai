@@ -13,6 +13,7 @@ from app.modules.doctors.models import Doctor, DoctorPatientAssignment, PatientN
 from app.modules.ai_apis.models import AIPrediction  # noqa: F401
 from app.modules.appointments.models import Appointment  # noqa: F401
 from app.modules.medical_reports.models import MedicalReport  # noqa: F401
+from app.modules.prescriptions.models import Prescription  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
