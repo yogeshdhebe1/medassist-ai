@@ -1,53 +1,45 @@
-# Notifications Module — Update Package
+# Analytics Module — Update Package
 
-Adds in-app notifications, plus something more interesting: a reusable `NotificationService.notify()` helper that **other modules call as a side effect of their own actions** — this is the first bit of cross-module, event-driven behavior in the codebase (previously every module only touched its own data).
-
-## What's new
-
-- `app/modules/notifications/` — full module (model, schemas, repository, service, router)
-- `app/modules/appointments/services.py` — **modified**: now sends a notification to the doctor when a patient books, and to the patient when the doctor confirms
-- `app/modules/prescriptions/services.py` — **modified**: now sends a notification to the patient when a doctor issues a prescription
-- `app/main.py`, `alembic/env.py` — **modified**: register the new router/model
+Admin-only dashboard endpoints that aggregate data across every other module — this is the first module that's purely **read-only aggregation**, no new database table of its own.
 
 ## New endpoints
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/v1/notifications` | Bearer (any role) | List your notifications (supports `?unread_only=true`) |
-| GET | `/v1/notifications/unread-count` | Bearer (any role) | Get just the unread count (for a UI badge) |
-| PATCH | `/v1/notifications/{notification_id}/read` | Bearer (owner only) | Mark a notification as read |
+| GET | `/v1/admin/analytics/overview` | Bearer (role: admin) | Platform-wide counts: patients, doctors, appointments, reports, predictions, prescriptions |
+| GET | `/v1/admin/analytics/ai-monitoring` | Bearer (role: admin) | Per-AI-module stats: total predictions, average confidence, high-risk count |
 
 ## How to apply
 
-1. Copy `backend/` content into your repo's `backend/`:
-   - Add the new `app/modules/notifications/` folder
-   - **Overwrite** `app/modules/appointments/services.py` and `app/modules/prescriptions/services.py` (these now call the notification service)
-   - Overwrite `app/main.py` and `alembic/env.py`
-2. Migrate:
+1. Copy `backend/app/modules/analytics/` into your repo, and overwrite `app/main.py`.
+2. **No migration needed** — this module only reads existing tables.
+3. Restart:
    ```powershell
-   cd backend
-   venv\Scripts\activate
-   alembic revision --autogenerate -m "create notifications table"
-   alembic upgrade head
    uvicorn app.main:app --reload
    ```
 
+## You need an admin test user first
+
+You haven't created one yet in this project. Register a new user, then promote it:
+
+1. `POST /v1/auth/register`:
+   ```json
+   { "email": "admin@example.com", "phone": "+911234567892", "password": "Passw0rd!" }
+   ```
+2. Promote + verify:
+   ```powershell
+   psql -U postgres -d medassist -c "UPDATE users SET role = 'admin', is_verified = true WHERE email = 'admin@example.com';"
+   ```
+3. Login as admin, Authorize with that token.
+
 ## How to test in Swagger UI
 
-The easiest way to test this is to **re-run actions from earlier modules** and watch notifications appear as a side effect:
-
-1. **As patient**: book a new appointment (`POST /v1/appointments`) with any doctor.
-2. **Switch to doctor token**: `GET /v1/notifications` → you should see a `"appointment_requested"` notification.
-3. **As doctor**: confirm that appointment (`PATCH /v1/appointments/{id}/status` → `"confirmed"`).
-4. **Switch to patient token**: `GET /v1/notifications` → you should see a `"appointment_confirmed"` notification.
-5. **As doctor**: issue a prescription for that patient (`POST /v1/prescriptions`).
-6. **As patient**: `GET /v1/notifications` → a `"prescription_issued"` notification should now also appear.
-7. `GET /v1/notifications/unread-count` → should show the count of unread notifications.
-8. `PATCH /v1/notifications/{notification_id}/read` on one of them → then check `unread-count` again, it should have decreased by 1.
-9. **RBAC test**: try marking a notification that belongs to a *different* user (copy an ID from the other role's list) → should get 403.
+1. `GET /v1/admin/analytics/overview` → should show real counts based on all the test data you've created so far (e.g. `total_patients: 1`, `appointments_last_30d: 2`, etc.)
+2. `GET /v1/admin/analytics/ai-monitoring` → should show a `diabetes` entry with `total_predictions: 2` (from your earlier high-risk and low-risk test predictions) and `high_risk_count: 1`.
+3. **RBAC test**: try either endpoint with a **patient or doctor** token → should get 403 (only admins can see platform-wide analytics, per the Security Architecture doc's principle of least privilege).
 
 ## Design notes
 
-- **`notify()` as a cross-module contract**: rather than each module writing directly to the `notifications` table, they all go through `NotificationService.notify(user_id, title, body, type)`. This is the same principle as the `_assert_assigned` RBAC check being centralized in one place — one method owns "how a notification gets created," so if you later swap this for real push notifications (FCM) or email, there's exactly one place to change.
-- **This is the first genuinely cross-module dependency** in the codebase (`appointments` and `prescriptions` now import from `notifications`). It's worth being able to explain in an interview why this doesn't create a circular import problem: `notifications` doesn't import anything from `appointments` or `prescriptions` — dependencies only flow one direction.
-- **`type` field is a free-form string** (not an enum) deliberately — new notification types (e.g. `report_analyzed` once the OCR module exists, `medicine_reminder`) can be added by any future module without a schema migration.
+- **No new table**: analytics is a read-only view over data owned by other modules — it queries `Patient`, `Doctor`, `Appointment`, `MedicalReport`, `AIPrediction`, and `Prescription` directly via SQLAlchemy `func.count()`, rather than duplicating data into an "analytics" table. This keeps the numbers always accurate/live rather than requiring a sync job.
+- **JSON aggregation done in Python, not SQL**: `high_risk_count` reads the `risk_level` key out of each prediction's `output_result` JSON column. This is deliberately done in Python (`repository.py`'s docstring explains why) rather than a Postgres JSONB query operator — keeps the code portable if you ever swap databases, at the cost of pulling more rows into memory. Worth mentioning as a scale tradeoff if asked: "how would this need to change for 1M+ predictions?" — the honest answer is you'd move this to a native JSONB query or a materialized summary table at that scale.
+- **This is the "Admin" persona's first real feature** — until now every module served patients/doctors. This is a good module to point to if asked "did you build for all three user roles."
