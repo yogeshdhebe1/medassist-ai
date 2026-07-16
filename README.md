@@ -1,47 +1,48 @@
-# Appointments Module — Update Package
+# Medical Reports Module — Update Package
 
-Connects patients and doctors through a bookable appointment flow, and — the interesting design detail — **confirming an appointment automatically creates the doctor↔patient assignment** used by the RBAC checks in the `doctors` module. This means in the real product flow, a doctor doesn't need a separate manual "assign" step (that endpoint was only a dev/testing shortcut) — booking and confirming an appointment is what naturally grants a doctor access to a patient's records.
+Adds file upload for medical reports (PDF/JPG/PNG), storage on local disk (a stand-in for S3 in this resume-scope project — the code structure matches what an S3 swap would look like), and RBAC-gated access (only the owning patient or their assigned doctor can view/download a report).
 
 ## New endpoints
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/appointments` | Bearer (role: patient) | Book an appointment with a doctor (must be a future date/time) |
-| GET | `/v1/appointments` | Bearer (role: patient or doctor) | List your own appointments (patients see their bookings, doctors see appointments booked with them) |
-| PATCH | `/v1/appointments/{appointment_id}/status` | Bearer (role: patient or doctor) | Update status: `pending → confirmed → completed`, or `cancelled` |
+| POST | `/v1/reports/upload` | Bearer (role: patient) | Upload a report file (multipart/form-data) |
+| GET | `/v1/reports` | Bearer (role: patient) | List your own uploaded reports |
+| GET | `/v1/reports/patient/{patient_id}` | Bearer (role: doctor) | List a specific assigned patient's reports |
+| GET | `/v1/reports/{report_id}` | Bearer (patient owner or assigned doctor) | Get report metadata |
+| GET | `/v1/reports/{report_id}/download` | Bearer (patient owner or assigned doctor) | Download the actual file |
+
+## Validation rules (per the API Design doc)
+
+- Allowed types: PDF, JPG, PNG only
+- Max size: 15 MB
+- Empty files rejected
+- Files stored under a randomized UUID filename (not the original filename) to avoid path traversal / filename collision issues — the original filename is preserved separately in the database for display/download purposes
 
 ## How to apply
 
-1. Copy `backend/` content into your repo's `backend/`, overwriting `app/main.py` and `alembic/env.py`, adding the new `app/modules/appointments/` folder.
+1. Copy `backend/` content into your repo's `backend/`, overwriting `app/main.py` and `alembic/env.py`, adding `app/modules/medical_reports/` and the `uploads/medical_reports/` folder.
 2. Migrate:
    ```powershell
    cd backend
    venv\Scripts\activate
-   alembic revision --autogenerate -m "create appointments table"
+   alembic revision --autogenerate -m "create medical_reports table"
    alembic upgrade head
    uvicorn app.main:app --reload
    ```
 
 ## How to test in Swagger UI
 
-1. **As patient**: `POST /v1/appointments`
-   ```json
-   {
-     "doctor_id": "a02e0fce-bfa7-495b-b87a-5894df309bd0",
-     "scheduled_at": "2026-08-01T10:00:00Z",
-     "reason": "Annual checkup"
-   }
-   ```
-   (use your doctor's `id` from `GET /v1/doctors/me`, and any future date)
-2. Try a **past date** → should get a 422 validation error (proves the future-date check works).
-3. **As patient**: `GET /v1/appointments` → your new appointment should appear with `"status": "pending"`.
-4. **Switch to doctor token** (Authorize with the doctor's token): `GET /v1/appointments` → the same appointment should appear here too.
-5. **As doctor**: `PATCH /v1/appointments/{appointment_id}/status` with `{"status": "confirmed"}`.
-6. **The interesting part** — now test the RBAC connection: if this doctor was *not* already assigned to this patient (fresh test patient), `GET /v1/doctors/me/patients` should now show them, and `POST /v1/doctors/me/patient-notes` for this patient should succeed — proving the appointment confirmation granted the access automatically.
-7. Try a **random appointment_id** (someone else's) with a **different doctor's token** → should get 403/404, proving a doctor can't update an appointment that isn't theirs.
+File upload endpoints render differently in Swagger — you'll see a **file picker** instead of a JSON body box.
+
+1. **As patient**: `POST /v1/reports/upload` → "Try it out" → click **"Choose File"** and pick any small PDF or image from your computer → optionally set `report_type` (e.g. `blood_test`) → Execute.
+   - Try uploading a `.txt` file → should get a 400 `INVALID_FILE` error (proves the MIME type check works).
+2. `GET /v1/reports` → your uploaded report should appear.
+3. `GET /v1/reports/{report_id}/download` → this one doesn't render nicely in Swagger (it returns a raw file), but you can copy the **cURL command** Swagger generates and run it in a terminal to actually download the file, or open the URL directly in a new browser tab while your Authorize token is active.
+4. **RBAC test**: switch to the doctor token and try `GET /v1/reports/patient/{patient_id}` with a patient they're **not** assigned to → should get 403.
 
 ## Design notes
 
-- **Status transitions aren't state-machine-enforced here** (e.g. nothing stops going `completed → pending`) — for a resume-scope project this is an acceptable simplification; a production version would validate legal transitions per the state defined in the SRS.
-- **Auto-assignment on confirm** is the key design decision worth mentioning in an interview: it means the RBAC relationship (`DoctorPatientAssignment`) is a side effect of a real clinical workflow event (confirming a booking) rather than an arbitrary admin action — this is closer to how the actual product would work.
-- Both patient and doctor can update status (e.g. patient cancels, doctor confirms) — the service layer's `_load_and_authorize` ensures whoever calls it can only act on appointments where they are a participant.
+- **Local disk storage now, S3-ready structure**: `services.py`'s `upload_report()` is the only place that touches the filesystem. In a real deployment, this function is exactly what you'd swap to call `boto3.client("s3").upload_fileobj(...)` instead of `open(...).write(...)` — the rest of the module (router, repository, RBAC) wouldn't change at all. This separation is worth mentioning if asked "how would you deploy file storage in production."
+- **RBAC reuses the doctor↔patient assignment** from the `doctors`/`appointments` modules — a doctor can only see a patient's reports if `DoctorPatientAssignment` exists, same mechanism as patient notes.
+- **OCR/AI analysis is intentionally not wired in yet** — per the AI Pipeline doc, `medical_report_ocr` and `medical_report_analyzer` are separate future modules that would consume this table's `file_path` as their input. This module's job is just reliable, secure file storage and retrieval.
