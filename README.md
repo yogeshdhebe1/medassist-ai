@@ -1,45 +1,85 @@
-# Analytics Module — Update Package
+# Final 3 Modules — Users, Settings, Chat
 
-Admin-only dashboard endpoints that aggregate data across every other module — this is the first module that's purely **read-only aggregation**, no new database table of its own.
+This update completes **all 13 originally planned backend modules**. `users` and `settings` add no new database tables of significant complexity; `chat` adds two new tables (`chat_sessions`, `chat_messages`).
 
-## New endpoints
+---
+
+## 1. Users (Admin) — `/v1/admin/users`
+
+Admin-facing user management, separate from the auth-flow-specific `UserRepository` in the `authentication` module.
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| GET | `/v1/admin/analytics/overview` | Bearer (role: admin) | Platform-wide counts: patients, doctors, appointments, reports, predictions, prescriptions |
-| GET | `/v1/admin/analytics/ai-monitoring` | Bearer (role: admin) | Per-AI-module stats: total predictions, average confidence, high-risk count |
+| GET | `/v1/admin/users` | Bearer (role: admin) | List/search/filter all users (`?role=`, `?is_active=`, `?search=`) |
+| PATCH | `/v1/admin/users/{user_id}/status` | Bearer (role: admin) | Activate/deactivate a user account |
+
+**Notable guardrail**: an admin cannot deactivate their own account via this endpoint (`SelfLockoutError`, 400) — a real safety concern worth having for any admin-management feature, and a good detail to mention if asked about edge cases you considered.
+
+## 2. Settings — `/v1/settings`
+
+Per-user preferences (notifications, language, theme), same lazy-creation pattern as `patients`/`doctors` profiles.
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/v1/settings/me` | Bearer (any role) | Get your settings (auto-creates defaults on first call) |
+| PUT | `/v1/settings/me` | Bearer (any role) | Update settings (partial updates supported) |
+
+## 3. Chat (AI Health Chatbot) — `/v1/chat`
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| POST | `/v1/chat/sessions` | Bearer (role: patient) | Start a new chat session |
+| POST | `/v1/chat/sessions/{session_id}/messages` | Bearer (owner patient) | Send a message, get a reply |
+| GET | `/v1/chat/sessions/{session_id}/messages` | Bearer (owner patient) | View message history |
+
+**Important honesty point for your resume/interview**: this chatbot is **keyword-matching, not a real LLM/RAG pipeline**. The AI Pipeline doc describes the "real" version as FAISS retrieval + an LLM — that requires external API keys and a vector database, which is out of scope for a resume project without ongoing hosting costs. What's built here is deliberately structured so that swapping in real RAG later only touches `bot_engine.py`'s `generate_reply()` function — sessions, message persistence, and the API contract don't change. **Be upfront about this distinction if asked** — claiming a keyword-matcher is "AI-powered NLP" would be a credibility risk in an interview; describing it accurately as "a rule-based chatbot architected to be RAG-upgradeable" is honest and still shows good design thinking.
 
 ## How to apply
 
-1. Copy `backend/app/modules/analytics/` into your repo, and overwrite `app/main.py`.
-2. **No migration needed** — this module only reads existing tables.
-3. Restart:
+1. Copy `backend/app/modules/{users,settings,chat}/` into your repo, overwrite `app/main.py` and `alembic/env.py`.
+2. Migrate:
    ```powershell
+   cd backend
+   venv\Scripts\activate
+   alembic revision --autogenerate -m "add settings, chat, and finalize users module"
+   alembic upgrade head
    uvicorn app.main:app --reload
    ```
 
-## You need an admin test user first
-
-You haven't created one yet in this project. Register a new user, then promote it:
-
-1. `POST /v1/auth/register`:
-   ```json
-   { "email": "admin@example.com", "phone": "+911234567892", "password": "Passw0rd!" }
-   ```
-2. Promote + verify:
-   ```powershell
-   psql -U postgres -d medassist -c "UPDATE users SET role = 'admin', is_verified = true WHERE email = 'admin@example.com';"
-   ```
-3. Login as admin, Authorize with that token.
-
 ## How to test in Swagger UI
 
-1. `GET /v1/admin/analytics/overview` → should show real counts based on all the test data you've created so far (e.g. `total_patients: 1`, `appointments_last_30d: 2`, etc.)
-2. `GET /v1/admin/analytics/ai-monitoring` → should show a `diabetes` entry with `total_predictions: 2` (from your earlier high-risk and low-risk test predictions) and `high_risk_count: 1`.
-3. **RBAC test**: try either endpoint with a **patient or doctor** token → should get 403 (only admins can see platform-wide analytics, per the Security Architecture doc's principle of least privilege).
+**Users (admin)**:
+1. As admin: `GET /v1/admin/users` → should list all your test users (patient, doctor, admin).
+2. Try `PATCH /v1/admin/users/{your_own_admin_user_id}/status` with `{"is_active": false}` → should get 400 `SELF_LOCKOUT`.
+3. Try it on a different user's ID → should succeed.
 
-## Design notes
+**Settings**:
+1. As any logged-in user: `GET /v1/settings/me` → defaults auto-created.
+2. `PUT /v1/settings/me` with `{"theme": "dark", "language": "hi"}` → partial update, other fields unchanged.
 
-- **No new table**: analytics is a read-only view over data owned by other modules — it queries `Patient`, `Doctor`, `Appointment`, `MedicalReport`, `AIPrediction`, and `Prescription` directly via SQLAlchemy `func.count()`, rather than duplicating data into an "analytics" table. This keeps the numbers always accurate/live rather than requiring a sync job.
-- **JSON aggregation done in Python, not SQL**: `high_risk_count` reads the `risk_level` key out of each prediction's `output_result` JSON column. This is deliberately done in Python (`repository.py`'s docstring explains why) rather than a Postgres JSONB query operator — keeps the code portable if you ever swap databases, at the cost of pulling more rows into memory. Worth mentioning as a scale tradeoff if asked: "how would this need to change for 1M+ predictions?" — the honest answer is you'd move this to a native JSONB query or a materialized summary table at that scale.
-- **This is the "Admin" persona's first real feature** — until now every module served patients/doctors. This is a good module to point to if asked "did you build for all three user roles."
+**Chat**:
+1. As patient: `POST /v1/chat/sessions` → get a `session_id`.
+2. `POST /v1/chat/sessions/{session_id}/messages` with `{"message": "I have a fever, what should I do?"}` → should get a relevant canned reply + disclaimer.
+3. Try `{"message": "tell me about diabetes"}` → different, topic-relevant reply.
+4. `GET /v1/chat/sessions/{session_id}/messages` → both your message and the bot's replies should appear, in order.
+5. **RBAC test**: try accessing someone else's `session_id` → 403.
+
+---
+
+## 🎉 All 13 backend modules complete
+
+| # | Module | 
+|---|---|
+| 1 | Authentication |
+| 2 | Users (Admin) |
+| 3 | Patients |
+| 4 | Doctors |
+| 5 | Appointments |
+| 6 | Medical Reports |
+| 7 | Prescriptions |
+| 8 | Notifications |
+| 9 | Chat |
+| 10 | AI APIs (Diabetes Prediction) |
+| 11 | Analytics |
+| 12 | File Upload (covered within Medical Reports) |
+| 13 | Settings |
