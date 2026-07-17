@@ -1,0 +1,20 @@
+{
+  "accuracy": 0.9762,
+  "f1_macro": 0.9837,
+  "train_samples": 4920,
+  "test_samples": 42,
+  "num_diseases": 41,
+  "num_symptoms": 132,
+  "top_10_symptom_importance": {
+    "visual_disturbances": 0.028599999845027924,
+    "movement_stiffness": 0.026499999687075615,
+    "unsteadiness": 0.021900000050663948,
+    "mucoid_sputum": 0.020999999716877937,
+    "lack_of_concentration": 0.020400000736117363,
+    "spotting_ urination": 0.01860000006854534,
+    "increased_appetite": 0.01860000006854534,
+    "slurred_speech": 0.018400000408291817,
+    "swelling_of_stomach": 0.018300000578165054,
+    "receiving_blood_transfusion": 0.017799999564886093
+  }
+}

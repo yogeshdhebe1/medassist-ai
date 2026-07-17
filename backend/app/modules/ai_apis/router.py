@@ -18,6 +18,14 @@ from app.modules.ai_apis.schemas import (
 from app.modules.ai_apis.services import AIPredictionService
 from app.modules.ai_apis.service_risk_score import HealthRiskScoreService
 from app.modules.ai_apis.schemas_risk_score import HealthRiskScoreResponse
+from app.modules.ai_apis.service_symptom import SymptomCheckerService
+from app.modules.ai_apis.schemas_symptom import (
+    SymptomCheckerRequest,
+    SymptomCheckerResponse,
+    KnownSymptomsResponse,
+)
+from app.modules.ai_apis.service_recommendation import RecommendationService
+from app.modules.ai_apis.schemas_recommendation import RecommendationRequest, RecommendationResponse
 
 router = APIRouter(prefix="/ai", tags=["AI Predictions"])
 
@@ -84,3 +92,42 @@ def calculate_health_risk_score(
     disease prediction to have been run first."""
     service = HealthRiskScoreService(db)
     return service.calculate(current_user.id)
+
+
+@router.get("/symptom-checker/symptoms", response_model=KnownSymptomsResponse)
+def list_known_symptoms(db: Session = Depends(get_db)):
+    """Returns the vocabulary of symptom names the symptom checker model
+    understands - use this to build a symptom checklist/autocomplete rather
+    than guessing valid symptom strings."""
+    service = SymptomCheckerService(db)
+    return service.list_known_symptoms()
+
+
+@router.post("/symptom-checker", response_model=SymptomCheckerResponse)
+def check_symptoms(
+    payload: SymptomCheckerRequest,
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+):
+    service = SymptomCheckerService(db)
+    return service.check_symptoms(current_user.id, payload)
+
+
+@router.post("/recommendations/diet", response_model=RecommendationResponse)
+def get_diet_recommendation(
+    payload: RecommendationRequest = RecommendationRequest(),
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+):
+    service = RecommendationService(db)
+    return service.get_diet_recommendation(current_user.id, payload.goal)
+
+
+@router.post("/recommendations/exercise", response_model=RecommendationResponse)
+def get_exercise_recommendation(
+    payload: RecommendationRequest = RecommendationRequest(),
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+):
+    service = RecommendationService(db)
+    return service.get_exercise_recommendation(current_user.id, payload.goal)
