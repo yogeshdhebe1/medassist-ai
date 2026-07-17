@@ -238,6 +238,93 @@ class StrokePredictionResponse(BaseModel):
     created_at: datetime
 
 
+class KidneyDiseasePredictionRequest(BaseModel):
+    age: float
+    bp: float  # blood pressure
+    sg: float  # urine specific gravity
+    al: float  # albumin (0-5)
+    su: float  # sugar (0-5)
+    rbc: str  # 'normal' or 'abnormal'
+    pc: str  # pus cell: 'normal' or 'abnormal'
+    pcc: str  # pus cell clumps: 'present' or 'notpresent'
+    ba: str  # bacteria: 'present' or 'notpresent'
+    bgr: float  # blood glucose random
+    bu: float  # blood urea
+    sc: float  # serum creatinine
+    sod: float  # sodium
+    pot: float  # potassium
+    hemo: float  # hemoglobin
+    pcv: float  # packed cell volume
+    wc: float  # white blood cell count
+    rc: float  # red blood cell count
+    htn: str  # hypertension: 'yes' or 'no'
+    dm: str  # diabetes mellitus: 'yes' or 'no'
+    cad: str  # coronary artery disease: 'yes' or 'no'
+    appet: str  # appetite: 'good' or 'poor'
+    pe: str  # pedal edema: 'yes' or 'no'
+    ane: str  # anemia: 'yes' or 'no'
+
+    @field_validator("age")
+    @classmethod
+    def validate_age(cls, v: float) -> float:
+        if not (0 <= v <= 120):
+            raise ValueError("age must be between 0 and 120")
+        return v
+
+    @field_validator("sg")
+    @classmethod
+    def validate_sg(cls, v: float) -> float:
+        if not (1.000 <= v <= 1.040):
+            raise ValueError("sg must be between 1.000 and 1.040")
+        return v
+
+    @field_validator("al", "su")
+    @classmethod
+    def validate_0_to_5(cls, v: float) -> float:
+        if not (0 <= v <= 5):
+            raise ValueError("must be between 0 and 5")
+        return v
+
+    @field_validator("rbc", "pc")
+    @classmethod
+    def validate_normal_abnormal(cls, v: str) -> str:
+        if v not in ("normal", "abnormal"):
+            raise ValueError("must be 'normal' or 'abnormal'")
+        return v
+
+    @field_validator("pcc", "ba")
+    @classmethod
+    def validate_present(cls, v: str) -> str:
+        if v not in ("present", "notpresent"):
+            raise ValueError("must be 'present' or 'notpresent'")
+        return v
+
+    @field_validator("htn", "dm", "cad", "pe", "ane")
+    @classmethod
+    def validate_yes_no(cls, v: str) -> str:
+        if v not in ("yes", "no"):
+            raise ValueError("must be 'yes' or 'no'")
+        return v
+
+    @field_validator("appet")
+    @classmethod
+    def validate_appet(cls, v: str) -> str:
+        if v not in ("good", "poor"):
+            raise ValueError("must be 'good' or 'poor'")
+        return v
+
+
+class KidneyDiseasePredictionResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    prediction_id: uuid.UUID
+    risk_level: str
+    probability: float
+    contributing_factors: list[str]
+    model_version: str
+    created_at: datetime
+
+
 class PredictionHistoryItem(BaseModel):
     model_config = {"protected_namespaces": (), "from_attributes": True}
 

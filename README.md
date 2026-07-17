@@ -1,94 +1,95 @@
-# Stroke Prediction — Update Package
+# Kidney Disease Prediction — Update Package
 
-Adds your **third real ML model**: stroke risk prediction, trained on the widely-used Kaggle Stroke Prediction dataset (5,110 patient records).
+Adds your **fourth and final disease-prediction ML model** — this completes the full set from the SRS (Diabetes, Heart Disease, Stroke, Kidney Disease).
+
+## ⚠️ Two honest things worth knowing about this one
+
+### 1. This dataset was the messiest to clean
+The raw UCI CKD CSV has real data-quality problems:
+- The target column has `'ckd'`, `'ckd\t'` (trailing tab), and `'notckd'` — the same class spelled two ways due to a stray tab character. Naively encoding without stripping whitespace would create a spurious 3rd class.
+- Categorical columns (`dm`, `cad`) have whitespace variants like `' yes'`, `'\tno'` for the same reason.
+- Three supposedly-numeric columns (`pcv`, `wc`, `rc`) are stored as strings because of stray whitespace in some cells — `.astype(float)` would crash; `pd.to_numeric(errors='coerce')` was needed instead.
+- Missingness is substantial and uneven (`rbc` ~38% missing, `wc`/`rc` 25-33% missing).
+
+See `train.py`'s docstring and the `clean_string_column()` / `preprocess()` functions for the full cleaning pipeline.
+
+### 2. The model scores ~100% accuracy / ROC-AUC — and that's a legitimate result, not a bug
+A perfect score is normally a red flag (data leakage, overfitting, or an accidental giveaway feature). **I checked for this before trusting it**:
+- Confirmed the `id` column is not in the feature set.
+- Ran 5-fold stratified cross-validation instead of trusting a single train/test split: scores were `[0.9993, 1.0, 0.9993, 1.0, 1.0]` — consistently near-perfect, not a fluke of one lucky split.
+
+This turns out to be a **known characteristic of this specific UCI CKD dataset** — CKD produces very distinctive lab abnormalities (hemoglobin, serum creatinine, urine specific gravity) that separate cleanly from healthy patients, and this is a commonly-cited "easy" benchmark in published papers using the same dataset. Unlike the heart disease and diabetes datasets (real patient data with natural biological overlap between classes), this dataset appears to have been curated with fairly clean separation for teaching purposes.
+
+**This is a good interview talking point**: showing you know that a perfect score demands scrutiny, not celebration, and that you actually did the verification (cross-validation, feature audit) rather than just shipping a suspiciously good number.
 
 ## Model performance
 
 | Metric | Value |
 |---|---|
-| Accuracy | 85.5% |
-| Precision | 20.5% |
-| Recall | **68.0%** |
-| F1 Score | 31.5% |
-| **ROC-AUC** | **84.6%** |
+| Accuracy | 100% |
+| Precision | 100% |
+| Recall | 100% |
+| F1 Score | 100% |
+| ROC-AUC | 100% (5-fold CV mean: 99.97%) |
 
-## ⚠️ Why precision looks "bad" here — an important, honest talking point
-
-This dataset is **heavily imbalanced**: only ~4.9% of patients actually had a stroke. A model that predicted "no stroke" for everyone would score 95% accuracy while being clinically useless. Given that imbalance:
-
-- **Recall (68%)** is the metric that matters most — it means the model correctly flags 68% of patients who actually go on to have a stroke. Missing a real stroke risk (a false negative) is far more costly than a false alarm, per the AI Pipeline doc's stated design principle ("sensitivity/recall prioritized - false negatives are clinically costlier than false positives").
-- **Precision (20.5%)** looks low, but this is expected and acceptable for a *screening* tool at this class imbalance: out of everyone the model flags as "at risk," about 1 in 5 will actually have a stroke — which is still a ~4x improvement over flagging at random (the population base rate is ~4.9%), and is the kind of tradeoff real clinical screening tools (e.g. mammography, cardiac stress tests) also make deliberately.
-- **Risk-level thresholds are calibrated differently than the other models** — since the population base rate is only ~5%, a 15-35% predicted probability is already meaningfully elevated (see `inference_stroke.py`'s comment on why the thresholds are lower here than diabetes/heart disease).
-
-**Be ready to explain this tradeoff if asked in an interview** — it shows you understand precision/recall tradeoffs on imbalanced medical data, not just that you called `.fit()`.
-
-Top predictive feature: **age (53% importance)** — by far the dominant factor, which matches real-world stroke epidemiology (age is the single strongest stroke risk factor).
+Top predictive features: `hemo` (hemoglobin), `pcv` (packed cell volume), `sc` (serum creatinine), `sg` (urine specific gravity) — all clinically core CKD diagnostic markers.
 
 ## What's included
 
-- `ai-training/stroke_prediction/` — dataset, `train.py`, `metrics.json`
-- `backend/ai_models/stroke_prediction/model/stroke_model.joblib`
+- `ai-training/kidney_disease_prediction/` — dataset, `train.py`, `metrics.json`
+- `backend/ai_models/kidney_disease_prediction/model/kidney_disease_model.joblib`
 - `backend/app/modules/ai_apis/`:
-  - `inference_stroke.py` — **new file**
-  - `schemas.py` — **overwrite**: now has diabetes + heart disease + stroke schemas
-  - `services.py` — **overwrite**: adds `predict_stroke_risk()`
-  - `router.py` — **overwrite**: adds `POST /v1/ai/disease-prediction/stroke`
+  - `inference_kidney.py` — **new file**
+  - `schemas.py` — **overwrite**: now has all 4 disease schemas
+  - `services.py` — **overwrite**: adds `predict_kidney_disease_risk()`
+  - `router.py` — **overwrite**: adds `POST /v1/ai/disease-prediction/kidney-disease`
 
 ## New endpoint
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/ai/disease-prediction/stroke` | Bearer (role: patient) | Run a stroke risk prediction |
+| POST | `/v1/ai/disease-prediction/kidney-disease` | Bearer (role: patient) | Run a kidney disease risk prediction |
 
 ## How to apply
 
-1. Copy `backend/ai_models/stroke_prediction/` into your repo's `backend/ai_models/`.
-2. In `backend/app/modules/ai_apis/`: add `inference_stroke.py`, overwrite `schemas.py`, `services.py`, `router.py`.
-3. **No migration needed** (reuses the `ai_predictions` table with `prediction_type="stroke"`).
+1. Copy `backend/ai_models/kidney_disease_prediction/` into your repo's `backend/ai_models/`.
+2. In `backend/app/modules/ai_apis/`: add `inference_kidney.py`, overwrite `schemas.py`, `services.py`, `router.py`.
+3. **No migration needed.**
 4. Restart: `uvicorn app.main:app --reload`
 
 ## How to test in Swagger UI
 
-**High-risk profile** (elderly, hypertension, heart disease, high glucose, smoker — expect `"risk_level": "high"`, probability ~0.72):
+**High-risk / classic CKD profile** (expect `"risk_level": "high"`, probability ~1.0):
 ```json
 {
-  "gender": "Male",
-  "age": 75,
-  "hypertension": 1,
-  "heart_disease": 1,
-  "ever_married": "Yes",
-  "work_type": "Private",
-  "residence_type": "Urban",
-  "avg_glucose_level": 220,
-  "bmi": 35,
-  "smoking_status": "smokes"
+  "age": 60, "bp": 90, "sg": 1.010, "al": 3, "su": 1,
+  "rbc": "abnormal", "pc": "abnormal", "pcc": "present", "ba": "notpresent",
+  "bgr": 150, "bu": 80, "sc": 3.5, "sod": 135, "pot": 5.0,
+  "hemo": 9.5, "pcv": 28, "wc": 9800, "rc": 3.5,
+  "htn": "yes", "dm": "yes", "cad": "no", "appet": "poor", "pe": "yes", "ane": "yes"
 }
 ```
 
-**Low-risk profile** (young, healthy — expect `"risk_level": "low"`, probability ~0.006):
+**Low-risk / healthy profile** (expect `"risk_level": "low"`, probability ~0.008):
 ```json
 {
-  "gender": "Female",
-  "age": 25,
-  "hypertension": 0,
-  "heart_disease": 0,
-  "ever_married": "No",
-  "work_type": "Private",
-  "residence_type": "Urban",
-  "avg_glucose_level": 85,
-  "bmi": 22,
-  "smoking_status": "never smoked"
+  "age": 30, "bp": 70, "sg": 1.025, "al": 0, "su": 0,
+  "rbc": "normal", "pc": "normal", "pcc": "notpresent", "ba": "notpresent",
+  "bgr": 95, "bu": 25, "sc": 0.8, "sod": 140, "pot": 4.2,
+  "hemo": 15.5, "pcv": 45, "wc": 7000, "rc": 5.2,
+  "htn": "no", "dm": "no", "cad": "no", "appet": "good", "pe": "no", "ane": "no"
 }
 ```
 
-Then `GET /v1/ai/predictions/history?prediction_type=stroke` to see both.
+Then `GET /v1/ai/predictions/history?prediction_type=kidney_disease` to see both.
 
-## Field reference
+---
 
-| Field | Valid values |
-|---|---|
-| `gender` | `Male`, `Female`, `Other` |
-| `ever_married` | `Yes`, `No` |
-| `work_type` | `Private`, `Self-employed`, `Govt_job`, `children`, `Never_worked` |
-| `residence_type` | `Urban`, `Rural` |
-| `smoking_status` | `never smoked`, `formerly smoked`, `smokes`, `Unknown` |
+## 🎉 All 4 disease-prediction models from the SRS are now complete
+
+| Model | ROC-AUC | Notable engineering detail |
+|---|---|---|
+| Diabetes | 0.82 | Zero-as-missing-value imputation |
+| Heart Disease | 0.91 | Found + fixed an inverted target label |
+| Stroke | 0.85 | Severe class imbalance (4.9% positive rate) |
+| Kidney Disease | ~1.00 | Messy whitespace/type cleanup + verified near-perfect score isn't leakage |
