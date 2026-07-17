@@ -9,6 +9,8 @@ from app.modules.ai_apis.schemas import (
     DiabetesPredictionResponse,
     HeartDiseasePredictionRequest,
     HeartDiseasePredictionResponse,
+    StrokePredictionRequest,
+    StrokePredictionResponse,
     PredictionHistoryItem,
 )
 from app.modules.ai_apis.services import AIPredictionService
@@ -34,6 +36,16 @@ def predict_heart_disease(
 ):
     service = AIPredictionService(db)
     return service.predict_heart_disease_risk(current_user.id, payload)
+
+
+@router.post("/disease-prediction/stroke", response_model=StrokePredictionResponse)
+def predict_stroke(
+    payload: StrokePredictionRequest,
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+):
+    service = AIPredictionService(db)
+    return service.predict_stroke_risk(current_user.id, payload)
 
 
 @router.get("/predictions/history", response_model=list[PredictionHistoryItem])

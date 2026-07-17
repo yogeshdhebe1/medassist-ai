@@ -1,0 +1,22 @@
+{
+  "accuracy": 0.8552,
+  "precision": 0.2048,
+  "recall": 0.68,
+  "f1_score": 0.3148,
+  "roc_auc": 0.8455,
+  "train_samples": 4088,
+  "test_samples": 1022,
+  "positive_class_rate": 0.0487,
+  "feature_importance": {
+    "age": 0.5303,
+    "avg_glucose_level": 0.1408,
+    "bmi": 0.1345,
+    "work_type": 0.0434,
+    "ever_married": 0.0403,
+    "hypertension": 0.0371,
+    "smoking_status": 0.0308,
+    "heart_disease": 0.0182,
+    "gender": 0.0125,
+    "Residence_type": 0.0121
+  }
+}

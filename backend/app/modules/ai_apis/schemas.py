@@ -63,18 +63,18 @@ class DiabetesPredictionResponse(BaseModel):
 
 class HeartDiseasePredictionRequest(BaseModel):
     age: int
-    sex: int  # 1 = male, 0 = female
-    cp: int  # chest pain type: 0-3
-    trestbps: float  # resting blood pressure
-    chol: float  # serum cholesterol
-    fbs: int  # fasting blood sugar > 120 mg/dl: 1 = true, 0 = false
-    restecg: int  # resting ECG results: 0-2
-    thalach: float  # max heart rate achieved
-    exang: int  # exercise-induced angina: 1 = yes, 0 = no
-    oldpeak: float  # ST depression induced by exercise
-    slope: int  # slope of peak exercise ST segment: 0-2
-    ca: int  # number of major vessels colored by fluoroscopy: 0-3
-    thal: int  # thalassemia: 1 = normal, 2 = fixed defect, 3 = reversible defect
+    sex: int
+    cp: int
+    trestbps: float
+    chol: float
+    fbs: int
+    restecg: int
+    thalach: float
+    exang: int
+    oldpeak: float
+    slope: int
+    ca: int
+    thal: int
 
     @field_validator("age")
     @classmethod
@@ -141,6 +141,93 @@ class HeartDiseasePredictionRequest(BaseModel):
 
 
 class HeartDiseasePredictionResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    prediction_id: uuid.UUID
+    risk_level: str
+    probability: float
+    contributing_factors: list[str]
+    model_version: str
+    created_at: datetime
+
+
+class StrokePredictionRequest(BaseModel):
+    gender: str  # 'Male', 'Female', 'Other'
+    age: float
+    hypertension: int  # 0 or 1
+    heart_disease: int  # 0 or 1
+    ever_married: str  # 'Yes' or 'No'
+    work_type: str  # 'Private', 'Self-employed', 'Govt_job', 'children', 'Never_worked'
+    residence_type: str  # 'Urban' or 'Rural'
+    avg_glucose_level: float
+    bmi: float
+    smoking_status: str  # 'never smoked', 'formerly smoked', 'smokes', 'Unknown'
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: str) -> str:
+        if v not in ("Male", "Female", "Other"):
+            raise ValueError("gender must be 'Male', 'Female', or 'Other'")
+        return v
+
+    @field_validator("age")
+    @classmethod
+    def validate_age(cls, v: float) -> float:
+        if not (0 <= v <= 120):
+            raise ValueError("age must be between 0 and 120")
+        return v
+
+    @field_validator("hypertension", "heart_disease")
+    @classmethod
+    def validate_binary(cls, v: int) -> int:
+        if v not in (0, 1):
+            raise ValueError("must be 0 or 1")
+        return v
+
+    @field_validator("ever_married")
+    @classmethod
+    def validate_ever_married(cls, v: str) -> str:
+        if v not in ("Yes", "No"):
+            raise ValueError("ever_married must be 'Yes' or 'No'")
+        return v
+
+    @field_validator("work_type")
+    @classmethod
+    def validate_work_type(cls, v: str) -> str:
+        if v not in ("Private", "Self-employed", "Govt_job", "children", "Never_worked"):
+            raise ValueError("invalid work_type")
+        return v
+
+    @field_validator("residence_type")
+    @classmethod
+    def validate_residence_type(cls, v: str) -> str:
+        if v not in ("Urban", "Rural"):
+            raise ValueError("residence_type must be 'Urban' or 'Rural'")
+        return v
+
+    @field_validator("avg_glucose_level")
+    @classmethod
+    def validate_glucose(cls, v: float) -> float:
+        if not (40 <= v <= 400):
+            raise ValueError("avg_glucose_level must be between 40 and 400")
+        return v
+
+    @field_validator("bmi")
+    @classmethod
+    def validate_bmi(cls, v: float) -> float:
+        if not (10 <= v <= 80):
+            raise ValueError("bmi must be between 10 and 80")
+        return v
+
+    @field_validator("smoking_status")
+    @classmethod
+    def validate_smoking_status(cls, v: str) -> str:
+        if v not in ("never smoked", "formerly smoked", "smokes", "Unknown"):
+            raise ValueError("invalid smoking_status")
+        return v
+
+
+class StrokePredictionResponse(BaseModel):
     model_config = {"protected_namespaces": ()}
 
     prediction_id: uuid.UUID
