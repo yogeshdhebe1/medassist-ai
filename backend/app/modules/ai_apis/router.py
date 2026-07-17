@@ -16,6 +16,8 @@ from app.modules.ai_apis.schemas import (
     PredictionHistoryItem,
 )
 from app.modules.ai_apis.services import AIPredictionService
+from app.modules.ai_apis.service_risk_score import HealthRiskScoreService
+from app.modules.ai_apis.schemas_risk_score import HealthRiskScoreResponse
 
 router = APIRouter(prefix="/ai", tags=["AI Predictions"])
 
@@ -70,3 +72,15 @@ def get_prediction_history(
 ):
     service = AIPredictionService(db)
     return service.get_history(current_user.id, prediction_type, page, page_size)
+
+
+@router.post("/health-risk-score", response_model=HealthRiskScoreResponse)
+def calculate_health_risk_score(
+    current_user: User = Depends(require_role("patient")),
+    db: Session = Depends(get_db),
+):
+    """Aggregates the patient's most recent diabetes/heart/stroke/kidney
+    predictions into a single overall risk score. Requires at least one
+    disease prediction to have been run first."""
+    service = HealthRiskScoreService(db)
+    return service.calculate(current_user.id)

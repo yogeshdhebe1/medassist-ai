@@ -1,95 +1,54 @@
-# Kidney Disease Prediction — Update Package
+# Health Risk Score — Update Package
 
-Adds your **fourth and final disease-prediction ML model** — this completes the full set from the SRS (Diabetes, Heart Disease, Stroke, Kidney Disease).
+Adds the last AI module from the SRS that reuses your existing 4 disease-prediction models rather than training anything new — an **aggregation layer**, per the AI Pipeline doc's design: *"Weighted ensemble aggregation of existing disease-prediction model outputs (not a new model trained from scratch)."*
 
-## ⚠️ Two honest things worth knowing about this one
+## What it does
 
-### 1. This dataset was the messiest to clean
-The raw UCI CKD CSV has real data-quality problems:
-- The target column has `'ckd'`, `'ckd\t'` (trailing tab), and `'notckd'` — the same class spelled two ways due to a stray tab character. Naively encoding without stripping whitespace would create a spurious 3rd class.
-- Categorical columns (`dm`, `cad`) have whitespace variants like `' yes'`, `'\tno'` for the same reason.
-- Three supposedly-numeric columns (`pcv`, `wc`, `rc`) are stored as strings because of stray whitespace in some cells — `.astype(float)` would crash; `pd.to_numeric(errors='coerce')` was needed instead.
-- Missingness is substantial and uneven (`rbc` ~38% missing, `wc`/`rc` 25-33% missing).
+`POST /v1/ai/health-risk-score` looks up the patient's **most recent** prediction from each of the 4 disease models (diabetes, heart disease, stroke, kidney disease), maps them to named components (`metabolic`, `cardiac`, `cerebrovascular`, `renal`), and averages them into a single 0-100 overall score.
 
-See `train.py`'s docstring and the `clean_string_column()` / `preprocess()` functions for the full cleaning pipeline.
+## Key design details worth knowing
 
-### 2. The model scores ~100% accuracy / ROC-AUC — and that's a legitimate result, not a bug
-A perfect score is normally a red flag (data leakage, overfitting, or an accidental giveaway feature). **I checked for this before trusting it**:
-- Confirmed the `id` column is not in the feature set.
-- Ran 5-fold stratified cross-validation instead of trusting a single train/test split: scores were `[0.9993, 1.0, 0.9993, 1.0, 1.0]` — consistently near-perfect, not a fluke of one lucky split.
-
-This turns out to be a **known characteristic of this specific UCI CKD dataset** — CKD produces very distinctive lab abnormalities (hemoglobin, serum creatinine, urine specific gravity) that separate cleanly from healthy patients, and this is a commonly-cited "easy" benchmark in published papers using the same dataset. Unlike the heart disease and diabetes datasets (real patient data with natural biological overlap between classes), this dataset appears to have been curated with fairly clean separation for teaching purposes.
-
-**This is a good interview talking point**: showing you know that a perfect score demands scrutiny, not celebration, and that you actually did the verification (cross-validation, feature audit) rather than just shipping a suspiciously good number.
-
-## Model performance
-
-| Metric | Value |
-|---|---|
-| Accuracy | 100% |
-| Precision | 100% |
-| Recall | 100% |
-| F1 Score | 100% |
-| ROC-AUC | 100% (5-fold CV mean: 99.97%) |
-
-Top predictive features: `hemo` (hemoglobin), `pcv` (packed cell volume), `sc` (serum creatinine), `sg` (urine specific gravity) — all clinically core CKD diagnostic markers.
+- **Graceful degradation**: if a patient has only run 2 of the 4 disease predictions (say, diabetes and heart disease), the score is still calculated from those 2 — it doesn't fail, and it doesn't silently treat the missing 2 as "0% risk" (which would incorrectly drag the score down). The response tells you exactly which components were used (`components_available`) and which were missing (`components_missing`), so the UI/patient can see the score is partial.
+- **Trend tracking**: every calculation is persisted (`health_risk_scores` table), and each new calculation compares itself to the patient's previous score to report `"improving"`, `"stable"`, `"worsening"`, or `"first_calculation"` — this is why it's a table with a timestamp, not just a stateless calculation.
+- **No new ML training**: this endpoint calls no model directly — it reads the `confidence_score` already stored on the patient's most recent `AIPrediction` rows (from when they ran the individual disease predictions) and does a weighted average.
+- **Equal weighting, documented as tunable**: the AI Pipeline doc describes future weights as "derived from clinical literature on relative risk severity, tunable per admin configuration." For this resume-scope version, all 4 components are weighted equally rather than inventing unsourced severity weights — being upfront about this in an interview is better than presenting made-up clinical weightings as authoritative.
 
 ## What's included
 
-- `ai-training/kidney_disease_prediction/` — dataset, `train.py`, `metrics.json`
-- `backend/ai_models/kidney_disease_prediction/model/kidney_disease_model.joblib`
-- `backend/app/modules/ai_apis/`:
-  - `inference_kidney.py` — **new file**
-  - `schemas.py` — **overwrite**: now has all 4 disease schemas
-  - `services.py` — **overwrite**: adds `predict_kidney_disease_risk()`
-  - `router.py` — **overwrite**: adds `POST /v1/ai/disease-prediction/kidney-disease`
+- `app/modules/ai_apis/models_risk_score.py` — **new file**: `HealthRiskScore` table
+- `app/modules/ai_apis/schemas_risk_score.py` — **new file**: response schema
+- `app/modules/ai_apis/repository_risk_score.py` — **new file**
+- `app/modules/ai_apis/service_risk_score.py` — **new file**: the aggregation + trend logic
+- `app/modules/ai_apis/router.py` — **overwrite**: adds `POST /v1/ai/health-risk-score`
 
 ## New endpoint
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/ai/disease-prediction/kidney-disease` | Bearer (role: patient) | Run a kidney disease risk prediction |
+| POST | `/v1/ai/health-risk-score` | Bearer (role: patient) | Aggregate the patient's latest disease predictions into one score |
 
 ## How to apply
 
-1. Copy `backend/ai_models/kidney_disease_prediction/` into your repo's `backend/ai_models/`.
-2. In `backend/app/modules/ai_apis/`: add `inference_kidney.py`, overwrite `schemas.py`, `services.py`, `router.py`.
-3. **No migration needed.**
-4. Restart: `uvicorn app.main:app --reload`
+1. Copy the 4 new files into `backend/app/modules/ai_apis/`.
+2. Overwrite `backend/app/modules/ai_apis/router.py`.
+3. **Register the new model with Alembic** — open `backend/alembic/env.py` and add this import alongside the other model imports:
+   ```python
+   from app.modules.ai_apis.models_risk_score import HealthRiskScore  # noqa: F401
+   ```
+4. Migrate:
+   ```powershell
+   cd backend
+   venv\Scripts\activate
+   alembic revision --autogenerate -m "add health_risk_scores table"
+   alembic upgrade head
+   uvicorn app.main:app --reload
+   ```
 
 ## How to test in Swagger UI
 
-**High-risk / classic CKD profile** (expect `"risk_level": "high"`, probability ~1.0):
-```json
-{
-  "age": 60, "bp": 90, "sg": 1.010, "al": 3, "su": 1,
-  "rbc": "abnormal", "pc": "abnormal", "pcc": "present", "ba": "notpresent",
-  "bgr": 150, "bu": 80, "sc": 3.5, "sod": 135, "pot": 5.0,
-  "hemo": 9.5, "pcv": 28, "wc": 9800, "rc": 3.5,
-  "htn": "yes", "dm": "yes", "cad": "no", "appet": "poor", "pe": "yes", "ane": "yes"
-}
-```
+You need at least one disease prediction already run for this to work (you should have several from earlier testing).
 
-**Low-risk / healthy profile** (expect `"risk_level": "low"`, probability ~0.008):
-```json
-{
-  "age": 30, "bp": 70, "sg": 1.025, "al": 0, "su": 0,
-  "rbc": "normal", "pc": "normal", "pcc": "notpresent", "ba": "notpresent",
-  "bgr": 95, "bu": 25, "sc": 0.8, "sod": 140, "pot": 4.2,
-  "hemo": 15.5, "pcv": 45, "wc": 7000, "rc": 5.2,
-  "htn": "no", "dm": "no", "cad": "no", "appet": "good", "pe": "no", "ane": "no"
-}
-```
-
-Then `GET /v1/ai/predictions/history?prediction_type=kidney_disease` to see both.
-
----
-
-## 🎉 All 4 disease-prediction models from the SRS are now complete
-
-| Model | ROC-AUC | Notable engineering detail |
-|---|---|---|
-| Diabetes | 0.82 | Zero-as-missing-value imputation |
-| Heart Disease | 0.91 | Found + fixed an inverted target label |
-| Stroke | 0.85 | Severe class imbalance (4.9% positive rate) |
-| Kidney Disease | ~1.00 | Messy whitespace/type cleanup + verified near-perfect score isn't leakage |
+1. As patient: `POST /v1/ai/health-risk-score` (no request body needed) → should return an overall score, with `components_available` listing whichever of `cardiac`/`metabolic`/`renal`/`cerebrovascular` you've run predictions for, and `trend: "first_calculation"` on the first call.
+2. Run it again → `trend` should now say `"stable"` (since your underlying predictions haven't changed).
+3. Run a **new** heart disease prediction with a much higher risk profile than before, then call `/v1/ai/health-risk-score` again → `trend` should change to `"worsening"`.
+4. **Edge case test**: if you test this against a *brand new* patient (register a new test user, don't run any disease predictions) → `POST /v1/ai/health-risk-score` should return **400 `NO_PREDICTIONS_AVAILABLE`** rather than crashing or returning a nonsensical score.
