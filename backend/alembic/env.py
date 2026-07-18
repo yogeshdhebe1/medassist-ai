@@ -18,6 +18,7 @@ from app.modules.notifications.models import Notification  # noqa: F401
 from app.modules.settings.models import UserSettings  # noqa: F401
 from app.modules.chat.models import ChatSession, ChatMessage  # noqa: F401
 from app.modules.ai_apis.models_risk_score import HealthRiskScore  # noqa: F401
+from app.modules.medical_reports.models_analysis import ReportOCRResult, ReportAnalysis  # noqa: F401
 # analytics and users modules query existing tables and add no new models
 
 config = context.config

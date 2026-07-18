@@ -1,51 +1,99 @@
-# Recommendation Engine — Update Package
+# Medical Report OCR + Analyzer — Update Package
 
-Adds diet and exercise recommendations — the last AI module from the SRS's original 7-module list (Symptom Checker, 4x Disease Prediction, Chatbot, and this one are now all done; Medical Report OCR/Analyzer remain, covered separately since they need actual image files to test meaningfully).
+Adds the **last AI module** from the SRS's original list — extracts structured lab values from an uploaded report image (OCR) and flags abnormal values against reference ranges (rule-based analysis).
 
-## Design: rule-based, not a trained model — and why
+## ⚠️ Two setup steps unique to this module (read before applying)
 
-Per the AI Pipeline doc: *"A hybrid rule + retrieval system guarantees clinically-vetted safety constraints are always respected... avoids the risk of a purely generative recommender suggesting something contraindicated for a patient's condition."* This module implements the rule-based safety-filtering half of that design (the part that actually matters for correctness); the FAISS similarity-based personalization-variety layer is omitted to keep this dependency-light for a resume-scope project.
+### 1. Install Tesseract OCR (a system program, not just a Python package)
 
-**Safety-first selection order**: clinical contraindications always override goal-based preferences. If a patient has elevated kidney disease risk, they get the renal-friendly diet **regardless of their weight-loss goal** — a purely goal-driven recommender could suggest something clinically inappropriate, which is exactly the failure mode this design avoids.
+Unlike every previous module, this one needs a **non-Python program** installed on your machine — `pytesseract` is just a thin Python wrapper around the actual Tesseract OCR engine.
 
-## How it decides what to recommend
+**Windows:**
+1. Download the installer from: https://github.com/UB-Mannheim/tesseract/wiki (the UB-Mannheim build is the standard Windows distribution)
+2. Run it, noting the install path (default is usually `C:\Program Files\Tesseract-OCR\`)
+3. Add this to your `.env` file:
+   ```
+   TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+   ```
+   (This backend code reads this env var and points `pytesseract` at it — without it, Windows won't find Tesseract since it's not automatically added to PATH the way it is on Linux.)
 
-1. **Fetches the patient's context**: age (from date of birth), BMI (from height/weight), and their **most recent** risk_level from each of the 4 disease-prediction models (reuses your existing `ai_predictions` data — no new questions asked of the patient).
-2. **Diet selection priority**: kidney risk → heart/stroke risk → diabetes risk → goal-based (weight loss/gain) → general maintenance.
-3. **Exercise selection priority**: heart/stroke risk (low-impact only) → age ≥65 (mobility-focused) → goal-based → general fitness.
-4. Every response includes a **rationale** explaining which factor drove the selection, and a **disclaimer** that this is general guidance, not individualized medical advice.
+### 2. Why Tesseract instead of PaddleOCR (honest scoping note)
+
+The AI Pipeline doc specifies **PaddleOCR** for this module — chosen there for strong multilingual and table-structure recognition suitable for production. PaddleOCR requires the PaddlePaddle deep-learning framework plus multi-GB model downloads, which isn't practical for a resume-scope local project.
+
+**Tesseract OCR** is used instead — a single lightweight system package, much faster to install, and it demonstrates the identical architectural pattern (image → OCR text → structured parsing → rule-based analysis). The tradeoff: Tesseract does plain text extraction without PaddleOCR's table-structure awareness, so this implementation uses a **known-vocabulary regex parser** (matching against a fixed list of common lab test names) rather than general table-layout understanding. **This is a good, honest talking point for an interview** — explaining you understand the production-vs-resume-scope tradeoff, and specifically *what* capability was traded away (table structure recognition) for practicality.
+
+## What it does
+
+1. **OCR** (`ocr_engine.py`): runs Tesseract on an uploaded report image, then a regex parser extracts recognized lab test values (currently recognizes 12 common tests: Hemoglobin, Glucose, WBC Count, Platelet Count, Creatinine, Total Cholesterol, Blood Urea, Sodium, Potassium, RBC Count, HbA1c, Triglycerides).
+2. **Analysis** (`analyzer.py`): compares each extracted value against a reference range table, flags abnormal ones (high/low), and generates a plain-language summary + suggested next steps.
+
+## Test asset included
+
+`test-assets/sample_lab_report.png` — a synthetic lab report I generated (not a real scanned document, since none was available) with **known abnormal values built in**, so you can verify the whole pipeline works correctly:
+
+| Test | Value | Reference Range | Expected flag |
+|---|---|---|---|
+| Hemoglobin | 9.8 g/dL | 13.0-17.0 | **low** |
+| Glucose (Fasting) | 145 mg/dL | 70-100 | **high** |
+| WBC Count | 11200 cells/uL | 4000-11000 | **high** |
+| Platelet Count | 210000 cells/uL | 150000-450000 | normal |
+| Creatinine | 1.8 mg/dL | 0.7-1.3 | **high** |
+| Total Cholesterol | 245 mg/dL | 125-200 | **high** |
+
+Expected result: **5 of 6 values flagged abnormal**, only Platelet Count normal.
 
 ## What's included
 
-- `app/modules/ai_apis/recommendation_data.py` — **new file**: the curated diet/exercise plan library (11 plans total)
-- `app/modules/ai_apis/schemas_recommendation.py` — **new file**
-- `app/modules/ai_apis/service_recommendation.py` — **new file**: the selection logic
-- `app/modules/ai_apis/router.py` — **overwrite**: adds the 2 new endpoints (built on the version from the Symptom Checker update — includes everything from before too)
+- `app/modules/medical_reports/`:
+  - `reference_ranges.py` — **new file**: the 12-test reference range table
+  - `ocr_engine.py` — **new file**: Tesseract wrapper + regex value extraction
+  - `analyzer.py` — **new file**: rule-based abnormal-value flagging + summary generation
+  - `models_analysis.py` — **new file**: `ReportOCRResult`, `ReportAnalysis` tables
+  - `schemas_analysis.py` — **new file**
+  - `repository_analysis.py` — **new file**
+  - `service_analysis.py` — **new file**: orchestrates OCR → analysis → persistence, with the same RBAC pattern as the rest of `medical_reports`
+  - `router.py` — **overwrite**: adds the 2 new endpoints below (includes all previous upload/list/download endpoints too)
 
 ## New endpoints
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/ai/recommendations/diet` | Bearer (role: patient) | Get a diet plan (optional `{"goal": "weight_loss"\|"maintenance"\|"muscle_gain"}` override) |
-| POST | `/v1/ai/recommendations/exercise` | Bearer (role: patient) | Get an exercise plan (same optional override) |
+| POST | `/v1/reports/{report_id}/analyze` | Bearer (owner patient or assigned doctor) | Run OCR + analysis on an uploaded report (JPG/PNG only) |
+| GET | `/v1/reports/{report_id}/analysis` | Bearer (owner patient or assigned doctor) | Fetch previously-computed results |
 
 ## How to apply
 
-1. Add the 3 new files to `backend/app/modules/ai_apis/`.
-2. Overwrite `backend/app/modules/ai_apis/router.py`.
-3. **No new dependencies, no migration needed** — reuses existing patient profile + `ai_predictions` data.
-4. Restart: `uvicorn app.main:app --reload`
+1. Install Tesseract OCR (see step 1 above) and set `TESSERACT_CMD` in `.env` if on Windows.
+2. Add to `requirements/base.txt`:
+   ```
+   pytesseract==0.3.13
+   pillow==10.4.0
+   ```
+   Then: `pip install pytesseract==0.3.13 pillow==10.4.0`
+3. Add the 7 new files to `backend/app/modules/medical_reports/`, overwrite `router.py`.
+4. **Register the new models with Alembic** — open `backend/alembic/env.py` and add:
+   ```python
+   from app.modules.medical_reports.models_analysis import ReportOCRResult, ReportAnalysis  # noqa: F401
+   ```
+5. Migrate:
+   ```powershell
+   cd backend
+   venv\Scripts\activate
+   alembic revision --autogenerate -m "add report_ocr_results and report_analysis tables"
+   alembic upgrade head
+   uvicorn app.main:app --reload
+   ```
 
 ## How to test in Swagger UI
 
-Since this reads your patient's profile and prediction history, results will vary based on what you've already tested. A few scenarios to try:
-
-1. **Baseline**: `POST /v1/ai/recommendations/diet` with an empty body `{}` → since your test patient's profile has `height_cm: 175, weight_kg: 70` (BMI ~22.9, normal) and has run a heart disease prediction with `"risk_level": "high"` earlier in this session, expect the **heart-healthy plan**, with rationale mentioning "elevated cardiovascular/stroke risk."
-2. `POST /v1/ai/recommendations/exercise` with `{}` → expect the **low-impact cardiac-safe plan**, same reasoning.
-3. **Goal override test**: `POST /v1/ai/recommendations/diet` with `{"goal": "weight_loss"}` → the response should **still** return the heart-healthy plan, not the weight-loss plan — this proves the safety-first priority ordering works (clinical risk beats stated goal).
-4. To see the goal-based path instead, you'd need a patient with no elevated disease risk history.
+1. **Upload the test image**: `POST /v1/reports/upload` as patient → choose file → select `test-assets/sample_lab_report.png` → Execute. Note the returned `report_id`.
+2. **Run analysis**: `POST /v1/reports/{report_id}/analyze` with that `report_id` → should return both `ocr_result` (extracted fields + raw OCR text) and `analysis` (5 abnormal values, a summary sentence, and next-steps text).
+3. **Re-fetch without re-running**: `GET /v1/reports/{report_id}/analysis` → should return the same stored result instantly (no OCR re-run).
+4. **RBAC test**: try analyzing a report that belongs to a different patient (as a doctor not assigned to them) → expect 403.
+5. **Unsupported file type test**: if you have a PDF report uploaded from earlier testing, try analyzing it → expect a clear error message (PDF isn't supported by this implementation, documented above).
 
 ## Design notes
 
-- **Read-only, no new questions asked**: unlike the disease-prediction endpoints, this doesn't take clinical inputs directly — it reuses data the patient has already provided (profile + past predictions), which is a deliberately different interaction pattern worth mentioning if asked to compare the modules.
-- **Static plan library vs. FAISS retrieval**: the AI Pipeline doc's "curated plan library + nearest-neighbor retrieval" becomes, in this scope, a small fixed set of clinician-guideline-inspired plans selected by explicit rules. This trades personalization variety (FAISS would surface different plan *variants* for similar patients) for simplicity and zero extra infrastructure — an honest scope reduction to mention if asked about the gap between this and the full design.
+- **Idempotent re-analysis**: calling `/analyze` again on the same report updates the stored OCR/analysis records rather than creating duplicates (`upsert` pattern in the repository) — useful if you want to re-run after fixing something, without accumulating stale duplicate rows.
+- **Deterministic rule engine as source of truth**: per the AI Pipeline doc's core requirement for this module, the abnormal/normal flag is always computed by the deterministic reference-range comparison in `analyzer.py` — the "summary" text is just a template rendering of that same data, so there's no possibility of the human-readable summary contradicting the underlying flags (which is the property that mattered in the original design, independent of the LLM-vs-template question).

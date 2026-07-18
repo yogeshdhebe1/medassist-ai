@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     # CORS
     ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8080"]
+    TESSERACT_CMD: str = ""
 
 
 settings = Settings()

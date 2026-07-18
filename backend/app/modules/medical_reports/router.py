@@ -9,6 +9,8 @@ from app.db.session import get_db
 from app.modules.authentication.models import User
 from app.modules.medical_reports.schemas import MedicalReportResponse
 from app.modules.medical_reports.services import MedicalReportService
+from app.modules.medical_reports.schemas_analysis import AnalyzeReportResponse
+from app.modules.medical_reports.service_analysis import ReportAnalysisService
 
 router = APIRouter(prefix="/reports", tags=["Medical Reports"])
 
@@ -43,7 +45,6 @@ def list_patient_reports(
     current_user: User = Depends(require_role("doctor")),
     db: Session = Depends(get_db),
 ):
-    """Lets an assigned doctor view a specific patient's uploaded reports."""
     service = MedicalReportService(db)
     return service.list_patient_reports_as_doctor(current_user.id, patient_id, page, page_size)
 
@@ -71,3 +72,29 @@ def download_report(
         filename=report.original_filename,
         media_type="application/octet-stream",
     )
+
+
+@router.post("/{report_id}/analyze", response_model=AnalyzeReportResponse)
+def analyze_report(
+    report_id: uuid.UUID,
+    current_user: User = Depends(require_role("patient", "doctor")),
+    db: Session = Depends(get_db),
+):
+    """Runs OCR extraction + rule-based abnormal-value analysis on an
+    already-uploaded report. Currently supports JPG/PNG only. Safe to call
+    again on the same report - re-running replaces the stored OCR/analysis
+    results rather than duplicating them."""
+    service = ReportAnalysisService(db)
+    return service.analyze_report(report_id, current_user.id, current_user.role)
+
+
+@router.get("/{report_id}/analysis", response_model=AnalyzeReportResponse)
+def get_report_analysis(
+    report_id: uuid.UUID,
+    current_user: User = Depends(require_role("patient", "doctor")),
+    db: Session = Depends(get_db),
+):
+    """Fetches previously-computed OCR/analysis results. Returns 404 if
+    `/analyze` hasn't been called for this report yet."""
+    service = ReportAnalysisService(db)
+    return service.get_analysis(report_id, current_user.id, current_user.role)
