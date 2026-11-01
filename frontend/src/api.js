@@ -45,8 +45,8 @@ export const api = {
   checkSymptoms: (symptoms) => request("/ai/symptom-checker", { method: "POST", body: { symptoms } }),
 
   getHealthRiskScore: () => request("/ai/health-risk-score", { method: "POST" }),
-  getDietRecommendation: () => request("/ai/recommendations/diet"),
-  getExerciseRecommendation: () => request("/ai/recommendations/exercise"),
+  getDietRecommendation: (goal) => request("/ai/recommendations/diet", { method: "POST", body: goal ? { goal } : {} }),
+  getExerciseRecommendation: (goal) => request("/ai/recommendations/exercise", { method: "POST", body: goal ? { goal } : {} }),
 
   startChatSession: () => request("/chat/sessions", { method: "POST" }),
   sendChatMessage: (sessionId, message) => request(`/chat/sessions/${sessionId}/messages`, { method: "POST", body: { message } }),

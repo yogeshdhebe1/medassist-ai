@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity, Stethoscope, MessageCircle, Calendar, Search, ChevronRight, Send,
-  ArrowRight, Heart, Brain, Droplet, Wind, LogOut, Menu, AlertCircle, RefreshCw, FileText, UploadCloud
+  ArrowRight, Heart, Brain, Droplet, Wind, LogOut, Menu, AlertCircle, RefreshCw, FileText, UploadCloud, Salad, Dumbbell, Check
 } from "lucide-react";
 import { api } from "./api";
 import { C, FONTS, PulseLine, riskVisual, RiskWave, Button, Card, Badge, ErrorBanner } from "./ui";
@@ -94,6 +94,7 @@ function Shell({ view, goTo, children }) {
     { key: "disease-risk", label: "Disease Risk", icon: Heart },
     { key: "chat", label: "AI Chat", icon: MessageCircle },
     { key: "reports", label: "Reports", icon: FileText },
+    { key: "plan", label: "Lifestyle", icon: Salad },
     { key: "appointments", label: "Appointments", icon: Calendar },
   ];
   const signOut = () => { api.logout(); goTo("auth"); };
@@ -107,9 +108,9 @@ function Shell({ view, goTo, children }) {
           <button className="md:hidden" onClick={() => setMenuOpen(!menuOpen)}><Menu size={22} color={C.ink} /></button>
           <div className="hidden md:flex items-center gap-1">
             {nav.map((n) => (
-              <button key={n.key} onClick={() => goTo(n.key)} className="ma-body text-sm px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
+              <button key={n.key} onClick={() => goTo(n.key)} title={n.label} aria-label={n.label} className="ma-body text-sm px-3 py-2 rounded-lg flex items-center gap-1.5 transition-colors"
                 style={{ color: view === n.key ? C.vitalDeep : "#5F5A78", backgroundColor: view === n.key ? "#EDEAFB" : "transparent", fontWeight: view === n.key ? 500 : 400 }}>
-                <n.icon size={15} /> {n.label}
+                <n.icon size={15} /> <span className="hidden lg:inline">{n.label}</span>
               </button>
             ))}
           </div>
@@ -539,6 +540,89 @@ function Chat() {
 }
 
 /* =====================================================================
+   LIFESTYLE (diet + exercise plans from the recommendation engine)
+===================================================================== */
+const GOALS = [
+  { key: "", label: "Automatic" },
+  { key: "weight_loss", label: "Lose weight" },
+  { key: "maintenance", label: "Maintain" },
+  { key: "muscle_gain", label: "Build muscle" },
+];
+
+function Lifestyle() {
+  const [tab, setTab] = useState("diet");
+  const [goal, setGoal] = useState("");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setError(""); setData(null);
+    const call = tab === "diet" ? api.getDietRecommendation : api.getExerciseRecommendation;
+    call(goal || undefined)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab, goal]);
+
+  return (
+    <div className="ma-fade-up max-w-3xl">
+      <h1 className="ma-display text-2xl font-bold" style={{ color: C.ink }}>Lifestyle Plan</h1>
+      <p className="ma-body text-sm mt-1 mb-6" style={{ color: "#6E6B8A" }}>Diet and exercise suggestions based on your profile and your latest risk results.</p>
+
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <div className="inline-flex p-1 rounded-full" style={{ backgroundColor: C.paperDim }}>
+          {[["diet", "Diet", Salad], ["exercise", "Exercise", Dumbbell]].map(([k, label, Icon]) => (
+            <button key={k} onClick={() => setTab(k)} className="relative ma-body text-sm font-medium px-5 py-2 rounded-full flex items-center gap-2" style={{ color: tab === k ? C.white : "#5F5A78" }}>
+              {tab === k && <motion.span layoutId="lifestyle-tab" className="absolute inset-0 rounded-full" style={{ background: `linear-gradient(135deg, ${C.vital}, #7C6FE0)` }} transition={{ type: "spring", stiffness: 380, damping: 30 }} />}
+              <span className="relative flex items-center gap-2"><Icon size={15} /> {label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {GOALS.map((g) => (
+            <button key={g.key} onClick={() => setGoal(g.key)} className="ma-body text-sm px-3.5 py-2 rounded-full border transition-colors"
+              style={{ borderColor: goal === g.key ? C.vital : C.mist, backgroundColor: goal === g.key ? "#EDEAFB" : C.white, color: goal === g.key ? C.vitalDeep : "#5F5A78" }}>
+              {g.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <ErrorBanner message={error} />
+
+      <Card className="p-6">
+        {loading && (
+          <div className="flex flex-col items-center justify-center py-14">
+            <PulseLine width={300} height={60} beats={3} intensity={0.35} color={C.vital} />
+            <div className="ma-mono text-xs mt-3" style={{ color: "#9491AC" }}>Building your plan...</div>
+          </div>
+        )}
+        {!loading && data && (
+          <motion.div key={tab + goal} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+            <h2 className="ma-display text-xl font-bold" style={{ color: C.ink }}>{data.title}</h2>
+            <div className="ma-body text-sm mt-2 p-3 rounded-lg" style={{ backgroundColor: C.paperDim, color: "#5F5A78" }}>
+              <span className="font-medium" style={{ color: C.ink }}>Why this plan: </span>{data.rationale}
+            </div>
+            <ul className="mt-5 space-y-3">
+              {data.plan.map((item, i) => (
+                <motion.li key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 * i }} className="flex items-start gap-3">
+                  <span className="mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: "#EDEAFB" }}><Check size={12} color={C.vital} /></span>
+                  <span className="ma-body text-sm leading-relaxed" style={{ color: "#3F3A58" }}>{item}</span>
+                </motion.li>
+              ))}
+            </ul>
+            <div className="ma-body text-xs mt-6" style={{ color: "#9491AC" }}>{data.disclaimer}</div>
+          </motion.div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* =====================================================================
    LAB REPORTS (upload -> OCR -> flagged values)
 ===================================================================== */
 function AnalysisView({ data }) {
@@ -837,6 +921,7 @@ export default function App() {
       case "symptom-checker": return <Shell view={view} goTo={goTo}><SymptomChecker /></Shell>;
       case "disease-risk": return <Shell view={view} goTo={goTo}><DiseaseRisk /></Shell>;
       case "chat": return <Shell view={view} goTo={goTo}><Chat /></Shell>;
+      case "plan": return <Shell view={view} goTo={goTo}><Lifestyle /></Shell>;
       case "reports": return <Shell view={view} goTo={goTo}><Reports /></Shell>;
       case "appointments": return <Shell view={view} goTo={goTo}><Appointments /></Shell>;
       default: return <Shell view="dashboard" goTo={goTo}><Dashboard goTo={goTo} /></Shell>;

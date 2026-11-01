@@ -22,11 +22,11 @@ An AI-assisted healthcare platform prototype. Patients can screen for four chron
 - Disease risk check for diabetes, heart disease, stroke and kidney disease, with the factors behind each result
 - Symptom checker that ranks possible conditions from selected symptoms (results under 15% confidence are hidden)
 - Lab report reader: upload a JPG or PNG, and the values are extracted with OCR and flagged against reference ranges
+- Lifestyle plans: diet and exercise suggestions based on your profile and latest risk results, with a goal selector (rule-based)
 - Chat assistant (rule-based)
 - Appointments: list your bookings, pick a doctor from a dropdown and book a slot
 
 **Available through the API (no web screen yet)**
-- Diet and exercise recommendations based on your latest results
 - Prescriptions and in-app notifications
 - Doctor tools: profile, assigned patients, patient notes
 - Admin tools: user management and platform analytics
@@ -108,7 +108,6 @@ New accounts need `is_verified = true` in the database, since email/OTP verifica
 
 ## Roadmap
 
-- Recommendations page (diet and exercise) in the web app
 - Doctor and admin dashboards
 - pytest suite and CI
 - Rate limiting, audit logs and email verification
