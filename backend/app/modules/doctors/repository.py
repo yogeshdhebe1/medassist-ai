@@ -17,6 +17,15 @@ class DoctorRepository:
     def get_by_id(self, doctor_id: uuid.UUID) -> Doctor | None:
         return self.db.query(Doctor).filter(Doctor.id == doctor_id).first()
 
+    def list_all(self, page: int = 1, page_size: int = 50) -> list[Doctor]:
+        return (
+            self.db.query(Doctor)
+            .order_by(Doctor.created_at)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
     def create(self, user_id: uuid.UUID) -> Doctor:
         doctor = Doctor(user_id=user_id)
         self.db.add(doctor)

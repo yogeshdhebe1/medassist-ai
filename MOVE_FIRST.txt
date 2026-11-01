@@ -1,0 +1,4 @@
+1. In your repo, rename the current README.md (it is the old OCR update note) to docs/OCR_MODULE.md
+2. Copy README.md from this folder to the repo root
+3. Copy docs/screenshots/ into the repo's docs/ folder
+4. Copy your medassist-web folder into the repo as frontend/ (NOT the node_modules folder)

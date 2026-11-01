@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.deps import require_role
+from app.core.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.modules.authentication.models import User
 from app.modules.doctors.schemas import (
@@ -64,6 +64,18 @@ def add_patient_note(
     db: Session = Depends(get_db),
 ):
     return DoctorService(db).add_patient_note(current_user.id, payload)
+
+
+@router.get("", response_model=list[DoctorPublicProfileResponse])
+def list_doctors(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Lets any logged-in user (e.g. a patient booking an appointment) browse doctors.
+    Uses the public schema, so license numbers are never exposed."""
+    return DoctorService(db).list_doctors(page, page_size)
 
 
 @router.get("/{doctor_id}", response_model=DoctorPublicProfileResponse)

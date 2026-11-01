@@ -1,99 +1,115 @@
-# Medical Report OCR + Analyzer — Update Package
+# MedAssist AI
 
-Adds the **last AI module** from the SRS's original list — extracts structured lab values from an uploaded report image (OCR) and flags abnormal values against reference ranges (rule-based analysis).
+An AI-assisted healthcare platform prototype. Patients can screen for four chronic conditions, check symptoms, upload lab reports for automatic reading, chat with an assistant and book doctors. Doctors and admins get role-based access to the same data.
 
-## ⚠️ Two setup steps unique to this module (read before applying)
+> **Status:** personal portfolio project. It is not a medical device, and its predictions are screening hints, not diagnoses. See [Limitations](#limitations).
 
-### 1. Install Tesseract OCR (a system program, not just a Python package)
+## Screenshots
 
-Unlike every previous module, this one needs a **non-Python program** installed on your machine — `pytesseract` is just a thin Python wrapper around the actual Tesseract OCR engine.
+| Dashboard | Appointments |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Appointments](docs/screenshots/appointments.png) |
 
-**Windows:**
-1. Download the installer from: https://github.com/UB-Mannheim/tesseract/wiki (the UB-Mannheim build is the standard Windows distribution)
-2. Run it, noting the install path (default is usually `C:\Program Files\Tesseract-OCR\`)
-3. Add this to your `.env` file:
-   ```
-   TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
-   ```
-   (This backend code reads this env var and points `pytesseract` at it — without it, Windows won't find Tesseract since it's not automatically added to PATH the way it is on Linux.)
+## Features
 
-### 2. Why Tesseract instead of PaddleOCR (honest scoping note)
+**Patient web app**
+- Sign up and log in (JWT access and refresh tokens)
+- Dashboard with a combined health risk score and per-condition scores
+- Disease risk check for diabetes, heart disease, stroke and kidney disease, with the factors behind each result
+- Symptom checker that ranks possible conditions from selected symptoms
+- Chat assistant (rule-based)
+- Appointments: list your bookings, pick a doctor from a dropdown and book a slot
 
-The AI Pipeline doc specifies **PaddleOCR** for this module — chosen there for strong multilingual and table-structure recognition suitable for production. PaddleOCR requires the PaddlePaddle deep-learning framework plus multi-GB model downloads, which isn't practical for a resume-scope local project.
+**Available through the API (no web screen yet)**
+- Lab report OCR: upload a report image, extract values and flag the ones outside reference ranges
+- Diet and exercise recommendations based on your latest results
+- Prescriptions and in-app notifications
+- Doctor tools: profile, assigned patients, patient notes
+- Admin tools: user management and platform analytics
 
-**Tesseract OCR** is used instead — a single lightweight system package, much faster to install, and it demonstrates the identical architectural pattern (image → OCR text → structured parsing → rule-based analysis). The tradeoff: Tesseract does plain text extraction without PaddleOCR's table-structure awareness, so this implementation uses a **known-vocabulary regex parser** (matching against a fixed list of common lab test names) rather than general table-layout understanding. **This is a good, honest talking point for an interview** — explaining you understand the production-vs-resume-scope tradeoff, and specifically *what* capability was traded away (table structure recognition) for practicality.
+## Tech stack
 
-## What it does
+| Layer | Tools |
+|---|---|
+| Backend | Python, FastAPI, SQLAlchemy 2.0, Alembic, Pydantic v2 |
+| Database | PostgreSQL, Redis |
+| ML | scikit-learn (Random Forest), XGBoost, joblib |
+| OCR | Tesseract with a regex parser and reference-range analyzer |
+| Auth | JWT, Argon2 password hashing, role-based access control |
+| Frontend | React 18, Vite, Tailwind CSS, framer-motion |
 
-1. **OCR** (`ocr_engine.py`): runs Tesseract on an uploaded report image, then a regex parser extracts recognized lab test values (currently recognizes 12 common tests: Hemoglobin, Glucose, WBC Count, Platelet Count, Creatinine, Total Cholesterol, Blood Urea, Sodium, Potassium, RBC Count, HbA1c, Triglycerides).
-2. **Analysis** (`analyzer.py`): compares each extracted value against a reference range table, flags abnormal ones (high/low), and generates a plain-language summary + suggested next steps.
+## Architecture
 
-## Test asset included
+The backend is a modular monolith with 13 modules. Each module follows the same layers:
 
-`test-assets/sample_lab_report.png` — a synthetic lab report I generated (not a real scanned document, since none was available) with **known abnormal values built in**, so you can verify the whole pipeline works correctly:
+```
+router  ->  service  ->  repository  ->  model
+(HTTP)     (rules)      (database)      (tables)
+```
 
-| Test | Value | Reference Range | Expected flag |
-|---|---|---|---|
-| Hemoglobin | 9.8 g/dL | 13.0-17.0 | **low** |
-| Glucose (Fasting) | 145 mg/dL | 70-100 | **high** |
-| WBC Count | 11200 cells/uL | 4000-11000 | **high** |
-| Platelet Count | 210000 cells/uL | 150000-450000 | normal |
-| Creatinine | 1.8 mg/dL | 0.7-1.3 | **high** |
-| Total Cholesterol | 245 mg/dL | 125-200 | **high** |
+- Doctors can only read data for patients they are assigned to. This is enforced in the service layer, not only in route decorators.
+- Modules talk through events. For example, booking an appointment creates a notification without the appointments module calling the notifications module directly.
+- Predictions are stored in one generic `ai_predictions` table, and the health score is computed from the latest prediction of each type.
 
-Expected result: **5 of 6 values flagged abnormal**, only Platelet Count normal.
+## Machine learning
 
-## What's included
+| Model | Notes |
+|---|---|
+| Diabetes, heart disease, stroke, kidney disease | Random Forest or XGBoost on public datasets, evaluated on held-out data (ROC-AUC between 0.82 and 1.00 across the four) |
+| Symptom checker | 41-class classifier, 97.6% accuracy on a held-out set |
+| Health risk score | Blends the single highest component score (70%) with the average of all available components (30%), so one high-risk condition is never hidden by low ones |
+| Recommendations | Rule-based, safety-first |
 
-- `app/modules/medical_reports/`:
-  - `reference_ranges.py` — **new file**: the 12-test reference range table
-  - `ocr_engine.py` — **new file**: Tesseract wrapper + regex value extraction
-  - `analyzer.py` — **new file**: rule-based abnormal-value flagging + summary generation
-  - `models_analysis.py` — **new file**: `ReportOCRResult`, `ReportAnalysis` tables
-  - `schemas_analysis.py` — **new file**
-  - `repository_analysis.py` — **new file**
-  - `service_analysis.py` — **new file**: orchestrates OCR → analysis → persistence, with the same RBAC pattern as the rest of `medical_reports`
-  - `router.py` — **overwrite**: adds the 2 new endpoints below (includes all previous upload/list/download endpoints too)
+Things worth knowing:
+- The heart disease dataset had an inverted target label. It was found by checking group statistics against clinical expectations, then fixed and retrained.
+- The stroke data is about 95/5 imbalanced, so recall matters more than precision there. The model uses `class_weight="balanced"` and a lower alert threshold.
+- The kidney model scored close to 100%, so it was cross-validated (5-fold) and the features were checked for leakage before it was trusted.
 
-## New endpoints
+## Run it locally
 
-| Method | Route | Auth | Description |
-|---|---|---|---|
-| POST | `/v1/reports/{report_id}/analyze` | Bearer (owner patient or assigned doctor) | Run OCR + analysis on an uploaded report (JPG/PNG only) |
-| GET | `/v1/reports/{report_id}/analysis` | Bearer (owner patient or assigned doctor) | Fetch previously-computed results |
+You need Python 3.11+, PostgreSQL 16, Redis (or Memurai on Windows) and Node 18+. Tesseract is only needed for report OCR.
 
-## How to apply
+**Backend**
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate          # Windows. On Linux/macOS: source venv/bin/activate
+pip install -r requirements.txt
+# create .env with DATABASE_URL, SECRET_KEY and (optional) TESSERACT_CMD
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+API docs: http://127.0.0.1:8000/docs
 
-1. Install Tesseract OCR (see step 1 above) and set `TESSERACT_CMD` in `.env` if on Windows.
-2. Add to `requirements/base.txt`:
-   ```
-   pytesseract==0.3.13
-   pillow==10.4.0
-   ```
-   Then: `pip install pytesseract==0.3.13 pillow==10.4.0`
-3. Add the 7 new files to `backend/app/modules/medical_reports/`, overwrite `router.py`.
-4. **Register the new models with Alembic** — open `backend/alembic/env.py` and add:
-   ```python
-   from app.modules.medical_reports.models_analysis import ReportOCRResult, ReportAnalysis  # noqa: F401
-   ```
-5. Migrate:
-   ```powershell
-   cd backend
-   venv\Scripts\activate
-   alembic revision --autogenerate -m "add report_ocr_results and report_analysis tables"
-   alembic upgrade head
-   uvicorn app.main:app --reload
-   ```
+**Frontend**
+```bash
+cd frontend
+npm install
+cp .env.example .env           # Windows: copy .env.example .env
+npm run dev
+```
+Open http://localhost:3000. The backend must be running, and `http://localhost:3000` must be allowed in its CORS settings.
 
-## How to test in Swagger UI
+New accounts need `is_verified = true` in the database, since email/OTP verification is not implemented yet.
 
-1. **Upload the test image**: `POST /v1/reports/upload` as patient → choose file → select `test-assets/sample_lab_report.png` → Execute. Note the returned `report_id`.
-2. **Run analysis**: `POST /v1/reports/{report_id}/analyze` with that `report_id` → should return both `ocr_result` (extracted fields + raw OCR text) and `analysis` (5 abnormal values, a summary sentence, and next-steps text).
-3. **Re-fetch without re-running**: `GET /v1/reports/{report_id}/analysis` → should return the same stored result instantly (no OCR re-run).
-4. **RBAC test**: try analyzing a report that belongs to a different patient (as a doctor not assigned to them) → expect 403.
-5. **Unsupported file type test**: if you have a PDF report uploaded from earlier testing, try analyzing it → expect a clear error message (PDF isn't supported by this implementation, documented above).
+## Limitations
 
-## Design notes
+- **Not clinically validated.** Models are trained on public datasets and were not reviewed by clinicians. Use results as hints only.
+- **Symptom checker is low-confidence for vague input.** With only one or two symptoms, probabilities are small and can include alarming conditions. A confidence threshold is planned.
+- **Chat assistant is rule-based**, not a language model.
+- **OCR uses Tesseract with a fixed list of 12 lab tests.** Production would need table-aware OCR (such as PaddleOCR) for general layouts.
+- **No email/OTP verification, rate limiting or audit logging yet.**
+- **No doctor or admin screens in the web app**, only API endpoints.
+- **No automated test suite yet**, and it has not been deployed.
 
-- **Idempotent re-analysis**: calling `/analyze` again on the same report updates the stored OCR/analysis records rather than creating duplicates (`upsert` pattern in the repository) — useful if you want to re-run after fixing something, without accumulating stale duplicate rows.
-- **Deterministic rule engine as source of truth**: per the AI Pipeline doc's core requirement for this module, the abnormal/normal flag is always computed by the deterministic reference-range comparison in `analyzer.py` — the "summary" text is just a template rendering of that same data, so there's no possibility of the human-readable summary contradicting the underlying flags (which is the property that mattered in the original design, independent of the LLM-vs-template question).
+## Roadmap
+
+- Report upload and recommendations pages in the web app
+- Doctor and admin dashboards
+- pytest suite and CI
+- Rate limiting, audit logs and email verification
+- Deployment (frontend on Vercel, backend on Render, database on Neon)
+
+## License
+
+See [LICENSE](LICENSE).

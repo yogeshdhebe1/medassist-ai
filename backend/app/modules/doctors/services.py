@@ -31,6 +31,9 @@ class DoctorService:
             raise NotFoundError("Doctor not found")
         return doctor
 
+    def list_doctors(self, page: int = 1, page_size: int = 50) -> list[Doctor]:
+        return self.repo.list_all(page, page_size)
+    
     def list_my_patients(self, doctor_user_id: uuid.UUID, page: int = 1, page_size: int = 20) -> list[Patient]:
         doctor = self.get_or_create_profile(doctor_user_id)
         return self.repo.list_assigned_patients(doctor.id, page, page_size)
