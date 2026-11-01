@@ -222,6 +222,8 @@ function Dashboard({ goTo }) {
 /* =====================================================================
    SYMPTOM CHECKER
 ===================================================================== */
+const MIN_CONFIDENCE = 0.15; // hide low-confidence guesses; they are mostly noise and can alarm users
+
 function SymptomChecker() {
   const [allSymptoms, setAllSymptoms] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -243,6 +245,7 @@ function SymptomChecker() {
   };
 
   const filtered = allSymptoms.filter((s) => s.includes(search.toLowerCase()));
+  const shown = result ? result.predictions.filter((r) => r.confidence >= MIN_CONFIDENCE) : [];
 
   return (
     <div className="ma-fade-up grid md:grid-cols-2 gap-6">
@@ -285,9 +288,16 @@ function SymptomChecker() {
             <div className="ma-mono text-xs mt-3" style={{ color: "#9491AC" }}>Running model...</div>
           </div>
         )}
-        {result && (
+        {result && shown.length === 0 && (
+          <div className="ma-body text-sm flex flex-col items-center justify-center h-64 text-center" style={{ color: "#6E6B8A" }}>
+            <AlertCircle size={26} className="mb-3" color={C.amber} />
+            <div className="font-medium" style={{ color: C.ink }}>Not enough information yet</div>
+            <div className="mt-1.5 max-w-xs">None of the possible conditions reached {Math.round(MIN_CONFIDENCE * 100)}% confidence. Add more symptoms for a more reliable result, or speak to a doctor if you are worried.</div>
+          </div>
+        )}
+        {result && shown.length > 0 && (
           <div className="space-y-4">
-            {result.predictions.map((r, i) => (
+            {shown.map((r, i) => (
               <div key={r.disease}>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="ma-body text-sm font-medium" style={{ color: C.ink }}>{i + 1}. {r.disease}</span>
@@ -298,6 +308,9 @@ function SymptomChecker() {
                 </div>
               </div>
             ))}
+            <div className="ma-body text-xs" style={{ color: "#9491AC" }}>
+              Showing conditions with at least {Math.round(MIN_CONFIDENCE * 100)}% confidence. This is general information, not a diagnosis.
+            </div>
             {result.recommend_doctor_visit && (
               <div className="ma-body text-xs p-3 rounded-lg flex items-center gap-2" style={{ backgroundColor: "#FBE0EA", color: "#A8285C" }}>
                 <AlertCircle size={14} /> Consider booking a doctor visit based on these results.
