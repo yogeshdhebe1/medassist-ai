@@ -6,9 +6,13 @@ An AI-assisted healthcare platform prototype. Patients can screen for four chron
 
 ## Screenshots
 
-| Dashboard | Appointments |
+| Landing page | Dashboard |
 |---|---|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Appointments](docs/screenshots/appointments.png) |
+| ![Landing page](docs/screenshots/landing.png) | ![Dashboard](docs/screenshots/dashboard.png) |
+
+| Lab report analysis | Appointments |
+|---|---|
+| ![Lab report analysis](docs/screenshots/reports.png) | ![Appointments](docs/screenshots/appointments.png) |
 
 ## Features
 
@@ -16,12 +20,12 @@ An AI-assisted healthcare platform prototype. Patients can screen for four chron
 - Sign up and log in (JWT access and refresh tokens)
 - Dashboard with a combined health risk score and per-condition scores
 - Disease risk check for diabetes, heart disease, stroke and kidney disease, with the factors behind each result
-- Symptom checker that ranks possible conditions from selected symptoms
+- Symptom checker that ranks possible conditions from selected symptoms (results under 15% confidence are hidden)
+- Lab report reader: upload a JPG or PNG, and the values are extracted with OCR and flagged against reference ranges
 - Chat assistant (rule-based)
 - Appointments: list your bookings, pick a doctor from a dropdown and book a slot
 
 **Available through the API (no web screen yet)**
-- Lab report OCR: upload a report image, extract values and flag the ones outside reference ranges
 - Diet and exercise recommendations based on your latest results
 - Prescriptions and in-app notifications
 - Doctor tools: profile, assigned patients, patient notes
@@ -95,7 +99,7 @@ New accounts need `is_verified = true` in the database, since email/OTP verifica
 ## Limitations
 
 - **Not clinically validated.** Models are trained on public datasets and were not reviewed by clinicians. Use results as hints only.
-- **Symptom checker is low-confidence for vague input.** With only one or two symptoms, probabilities are small and can include alarming conditions. A confidence threshold is planned.
+- **Symptom checker is low-confidence for vague input.** With only one or two symptoms, probabilities are small, so results under 15% are hidden and the app asks for more symptoms instead.
 - **Chat assistant is rule-based**, not a language model.
 - **OCR uses Tesseract with a fixed list of 12 lab tests.** Production would need table-aware OCR (such as PaddleOCR) for general layouts.
 - **No email/OTP verification, rate limiting or audit logging yet.**
@@ -104,7 +108,7 @@ New accounts need `is_verified = true` in the database, since email/OTP verifica
 
 ## Roadmap
 
-- Report upload and recommendations pages in the web app
+- Recommendations page (diet and exercise) in the web app
 - Doctor and admin dashboards
 - pytest suite and CI
 - Rate limiting, audit logs and email verification

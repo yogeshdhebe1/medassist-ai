@@ -4,12 +4,13 @@ const getToken = () => { try { return localStorage.getItem("access_token"); } ca
 const setToken = (t) => { try { t ? localStorage.setItem("access_token", t) : localStorage.removeItem("access_token"); } catch { /* ignore */ } };
 
 async function request(path, { method = "GET", body, auth = true } = {}) {
-  const headers = { "Content-Type": "application/json" };
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+  const headers = isForm ? {} : { "Content-Type": "application/json" };
   const token = getToken();
   if (auth && token) headers.Authorization = `Bearer ${token}`;
   let res;
   try {
-    res = await fetch(`${API_BASE}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(`${API_BASE}${path}`, { method, headers, body: body ? (isForm ? body : JSON.stringify(body)) : undefined });
   } catch {
     throw new Error("Cannot reach the backend. Is it running on " + API_BASE + "?");
   }
@@ -51,6 +52,15 @@ export const api = {
   sendChatMessage: (sessionId, message) => request(`/chat/sessions/${sessionId}/messages`, { method: "POST", body: { message } }),
 
   listDoctors: () => request("/doctors"),
+  uploadReport: (file, reportType) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (reportType) form.append("report_type", reportType);
+    return request("/reports/upload", { method: "POST", body: form });
+  },
+  listMyReports: () => request("/reports"),
+  analyzeReport: (id) => request(`/reports/${id}/analyze`, { method: "POST" }),
+  getReportAnalysis: (id) => request(`/reports/${id}/analysis`),
   listMyAppointments: () => request("/appointments"),
   bookAppointment: (doctorId, scheduledAt, reason) => request("/appointments", { method: "POST", body: { doctor_id: doctorId, scheduled_at: scheduledAt, reason } }),
 

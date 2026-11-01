@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity, Stethoscope, MessageCircle, Calendar, Search, ChevronRight, Send,
-  ArrowRight, Heart, Brain, Droplet, Wind, LogOut, Menu, AlertCircle, RefreshCw
+  ArrowRight, Heart, Brain, Droplet, Wind, LogOut, Menu, AlertCircle, RefreshCw, FileText, UploadCloud
 } from "lucide-react";
 import { api } from "./api";
 import { C, FONTS, PulseLine, riskVisual, RiskWave, Button, Card, Badge, ErrorBanner } from "./ui";
@@ -93,6 +93,7 @@ function Shell({ view, goTo, children }) {
     { key: "symptom-checker", label: "Symptom Checker", icon: Stethoscope },
     { key: "disease-risk", label: "Disease Risk", icon: Heart },
     { key: "chat", label: "AI Chat", icon: MessageCircle },
+    { key: "reports", label: "Reports", icon: FileText },
     { key: "appointments", label: "Appointments", icon: Calendar },
   ];
   const signOut = () => { api.logout(); goTo("auth"); };
@@ -538,6 +539,201 @@ function Chat() {
 }
 
 /* =====================================================================
+   LAB REPORTS (upload -> OCR -> flagged values)
+===================================================================== */
+function AnalysisView({ data }) {
+  const { analysis, ocr_result } = data;
+  const found = analysis.abnormal_values.length + analysis.normal_values.length;
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+      {found === 0 ? (
+        <div className="ma-body text-sm text-center py-10" style={{ color: "#6E6B8A" }}>
+          <AlertCircle size={26} className="mx-auto mb-3" color={C.amber} />
+          <div className="font-medium" style={{ color: C.ink }}>No known lab values found</div>
+          <div className="mt-1.5 max-w-sm mx-auto">Try a clear, well-lit photo or scan of a lab report. Only 12 common tests are recognised, such as hemoglobin, glucose and cholesterol.</div>
+        </div>
+      ) : (
+        <>
+          <div className="ma-body text-sm leading-relaxed mb-4" style={{ color: C.ink }}>{analysis.summary}</div>
+
+          {analysis.abnormal_values.length > 0 && (
+            <div className="mb-5">
+              <div className="ma-mono text-xs mb-2" style={{ color: "#A8285C" }}>OUTSIDE NORMAL RANGE</div>
+              <div className="space-y-2">
+                {analysis.abnormal_values.map((v, i) => (
+                  <motion.div key={v.test} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.06 }}
+                    className="flex items-center justify-between rounded-xl px-4 py-3" style={{ backgroundColor: "#FDF0F5", border: "1px solid #F6CBDB" }}>
+                    <div>
+                      <div className="ma-body text-sm font-medium" style={{ color: C.ink }}>{v.test}</div>
+                      <div className="ma-mono text-[11px]" style={{ color: "#9491AC" }}>normal {v.reference_range}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="ma-display font-bold" style={{ color: C.pulse }}>{v.value} <span className="text-xs font-normal">{v.unit}</span></span>
+                      <Badge tone="pulse">{v.flag}</Badge>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {analysis.normal_values.length > 0 && (
+            <div className="mb-5">
+              <div className="ma-mono text-xs mb-2" style={{ color: "#6E6B8A" }}>WITHIN NORMAL RANGE</div>
+              <div className="grid grid-cols-2 gap-2">
+                {analysis.normal_values.map((v) => (
+                  <div key={v.test} className="rounded-xl px-3 py-2.5" style={{ backgroundColor: C.paperDim }}>
+                    <div className="ma-body text-xs" style={{ color: "#6E6B8A" }}>{v.test}</div>
+                    <div className="ma-body text-sm font-medium" style={{ color: C.ink }}>{v.value} {v.unit}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {analysis.next_steps && (
+            <div className="ma-body text-sm p-3 rounded-lg" style={{ backgroundColor: "#EDEAFB", color: C.vitalDeep }}>
+              <span className="font-medium">Suggested next steps: </span>{analysis.next_steps}
+            </div>
+          )}
+        </>
+      )}
+      <div className="ma-mono text-[11px] mt-4" style={{ color: "#9491AC" }}>
+        {Object.keys(ocr_result.extracted_fields || {}).length}
+        {` of 12 known tests found`} · general information, not a diagnosis
+      </div>
+    </motion.div>
+  );
+}
+
+function Reports() {
+  const [reports, setReports] = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [file, setFile] = useState(null);
+  const [reportType, setReportType] = useState("");
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+  const [activeId, setActiveId] = useState(null);
+  const fileRef = useRef(null);
+
+  const loadList = () => {
+    api.listMyReports().then((d) => setReports(Array.isArray(d) ? d : [])).catch((e) => setError(e.message)).finally(() => setLoadingList(false));
+  };
+  useEffect(loadList, []);
+
+  const pickFile = (f) => {
+    setError("");
+    if (!f) return;
+    if (!["image/png", "image/jpeg"].includes(f.type)) {
+      setFile(null);
+      setError("Only JPG or PNG images can be analysed. Take a photo or screenshot of the report.");
+      return;
+    }
+    setFile(f);
+  };
+
+  const uploadAndAnalyze = async () => {
+    setError(""); setResult(null);
+    try {
+      setBusy("Uploading...");
+      const rep = await api.uploadReport(file, reportType.trim() || undefined);
+      setActiveId(rep.id);
+      setBusy("Reading the report...");
+      setResult(await api.analyzeReport(rep.id));
+      setFile(null); setReportType(""); if (fileRef.current) fileRef.current.value = "";
+      loadList();
+    } catch (e) {
+      setError(e.message);
+      loadList();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const openReport = async (id) => {
+    setError(""); setResult(null); setActiveId(id); setBusy("Loading analysis...");
+    try {
+      setResult(await api.getReportAnalysis(id));
+    } catch (e) {
+      try { setResult(await api.analyzeReport(id)); } catch (e2) { setError(e2.message); }
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="ma-fade-up grid md:grid-cols-2 gap-6">
+      <div>
+        <h1 className="ma-display text-2xl font-bold" style={{ color: C.ink }}>Lab Reports</h1>
+        <p className="ma-body text-sm mt-1 mb-5" style={{ color: "#6E6B8A" }}>Upload a photo of a lab report. We read the values and flag the ones outside the normal range.</p>
+        <ErrorBanner message={error} />
+
+        <Card className="p-5">
+          <label
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); pickFile(e.dataTransfer.files?.[0]); }}
+            className="flex flex-col items-center justify-center text-center rounded-2xl cursor-pointer py-9 px-4 transition-colors"
+            style={{ border: `2px dashed ${file ? C.vital : C.mistDeep}`, backgroundColor: file ? "#F3F1FD" : C.paper }}
+          >
+            <UploadCloud size={30} color={C.vital} />
+            <div className="ma-body text-sm font-medium mt-2" style={{ color: C.ink }}>{file ? file.name : "Choose an image or drop it here"}</div>
+            <div className="ma-body text-xs mt-1" style={{ color: "#9491AC" }}>{file ? `${(file.size / 1024).toFixed(0)} KB` : "JPG or PNG, up to 15 MB"}</div>
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
+          </label>
+          <div className="mt-4">
+            <label className="ma-mono text-xs" style={{ color: "#6E6B8A" }}>REPORT TYPE (OPTIONAL)</label>
+            <input value={reportType} onChange={(e) => setReportType(e.target.value)} placeholder="e.g. Blood test"
+              className="ma-body w-full mt-1 px-3 py-2 rounded-lg border outline-none text-sm" style={{ borderColor: C.mist }} />
+          </div>
+          <Button className="w-full mt-4" disabled={!file || !!busy} onClick={uploadAndAnalyze}>
+            {busy || "Upload and analyze"} {!busy && <ArrowRight size={16} />}
+          </Button>
+        </Card>
+
+        <div className="ma-mono text-xs mt-6 mb-2" style={{ color: "#6E6B8A" }}>YOUR REPORTS</div>
+        {loadingList ? (
+          <div className="ma-body text-sm" style={{ color: "#9491AC" }}>Loading...</div>
+        ) : reports.length === 0 ? (
+          <div className="ma-body text-sm" style={{ color: "#9491AC" }}>No reports yet.</div>
+        ) : (
+          <div className="space-y-2 max-h-64 overflow-y-auto ma-scrollbar pr-1">
+            {reports.map((r) => (
+              <Card key={r.id} onClick={() => openReport(r.id)} className="px-4 py-3" style={activeId === r.id ? { borderColor: C.vital } : {}}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="ma-body text-sm font-medium truncate" style={{ color: C.ink }}>{r.original_filename}</div>
+                    <div className="ma-mono text-[11px]" style={{ color: "#9491AC" }}>{new Date(r.uploaded_at).toLocaleString()}{r.report_type ? ` · ${r.report_type}` : ""}</div>
+                  </div>
+                  <ChevronRight size={16} color="#9491AC" className="shrink-0" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Card className="p-6 h-fit">
+        <div className="ma-mono text-xs mb-4" style={{ color: "#6E6B8A" }}>ANALYSIS</div>
+        {busy && (
+          <div className="flex flex-col items-center justify-center py-14">
+            <PulseLine width={300} height={60} beats={3} intensity={0.35} color={C.vital} />
+            <div className="ma-mono text-xs mt-3" style={{ color: "#9491AC" }}>{busy}</div>
+          </div>
+        )}
+        {!busy && !result && (
+          <div className="ma-body text-sm flex flex-col items-center justify-center text-center py-14" style={{ color: "#9491AC" }}>
+            <FileText size={28} className="mb-3" />
+            Upload a report, or pick one from your list, to see the analysis here.
+          </div>
+        )}
+        {!busy && result && <AnalysisView data={result} />}
+      </Card>
+    </div>
+  );
+}
+
+/* =====================================================================
    APPOINTMENTS
 ===================================================================== */
 function Appointments() {
@@ -641,6 +837,7 @@ export default function App() {
       case "symptom-checker": return <Shell view={view} goTo={goTo}><SymptomChecker /></Shell>;
       case "disease-risk": return <Shell view={view} goTo={goTo}><DiseaseRisk /></Shell>;
       case "chat": return <Shell view={view} goTo={goTo}><Chat /></Shell>;
+      case "reports": return <Shell view={view} goTo={goTo}><Reports /></Shell>;
       case "appointments": return <Shell view={view} goTo={goTo}><Appointments /></Shell>;
       default: return <Shell view="dashboard" goTo={goTo}><Dashboard goTo={goTo} /></Shell>;
     }
