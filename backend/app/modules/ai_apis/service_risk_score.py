@@ -15,10 +15,12 @@ COMPONENT_MAP = {
     "stroke": "cerebrovascular",
 }
 
-# Equal weighting by default (documented in the AI Pipeline doc as "tunable per
-# admin configuration" for a future iteration - kept equal and transparent here
-# rather than inventing unsourced clinical severity weights).
-COMPONENT_WEIGHT = 1.0 / len(COMPONENT_MAP)
+# Overall score blends the single worst component with the average of all
+# available components. A plain average hides a dangerous result: one condition
+# at 94% next to three low ones would average out to "stable". These two weights
+# are tunable and are a transparent design choice, not clinically derived values.
+WORST_WEIGHT = 0.7
+AVERAGE_WEIGHT = 0.3
 
 
 class NoDiseasePredictionsError(AppException):
@@ -57,11 +59,12 @@ class HealthRiskScoreService:
         if not components_available:
             raise NoDiseasePredictionsError()
 
-        # Graceful degradation (per AI Pipeline doc): compute the weighted average
-        # only over available components, re-normalizing weights so missing
-        # components don't silently drag the score toward zero.
+        # Graceful degradation (per AI Pipeline doc): only available components
+        # are used, so missing predictions don't silently drag the score toward zero.
         available_values = [component_scores[c] for c in components_available]
-        overall_score = round(sum(available_values) / len(available_values), 1)
+        worst = max(available_values)
+        average = sum(available_values) / len(available_values)
+        overall_score = round(WORST_WEIGHT * worst + AVERAGE_WEIGHT * average, 1)
 
         previous = self.repo.get_latest_score(patient.id)
         if previous is None:
