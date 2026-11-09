@@ -46,6 +46,7 @@ class AppointmentResponse(BaseModel):
     scheduled_at: datetime
     status: str
     reason: str | None
+    patient_name: str | None = None
     created_at: datetime
     updated_at: datetime
 

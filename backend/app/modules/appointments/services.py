@@ -76,6 +76,8 @@ class AppointmentService:
                     type="appointment_confirmed",
                 )
 
+        if role == "doctor":
+            self._attach_patient_names([updated])
         return updated
 
     def list_my_appointments(self, user_id: uuid.UUID, role: str, page: int, page_size: int) -> list[Appointment]:
@@ -88,5 +90,13 @@ class AppointmentService:
             doctor = self.doctor_repo.get_by_user_id(user_id)
             if not doctor:
                 return []
-            return self.repo.list_for_doctor(doctor.id, page, page_size)
+            items = self.repo.list_for_doctor(doctor.id, page, page_size)
+            self._attach_patient_names(items)
+            return items
         return []
+
+    def _attach_patient_names(self, appointments: list[Appointment]) -> None:
+        """Doctors see who each appointment is with (transient attribute, not persisted)."""
+        for a in appointments:
+            patient = self.patient_repo.get_by_id(a.patient_id)
+            a.patient_name = (patient.full_name if patient else None) or "Unnamed patient"

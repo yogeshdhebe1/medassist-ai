@@ -75,3 +75,11 @@ class DoctorRepository:
         self.db.commit()
         self.db.refresh(record)
         return record
+
+    def list_notes(self, doctor_id: uuid.UUID, patient_id: uuid.UUID) -> list[PatientNote]:
+        return (
+            self.db.query(PatientNote)
+            .filter(PatientNote.doctor_id == doctor_id, PatientNote.patient_id == patient_id)
+            .order_by(PatientNote.created_at.desc())
+            .all()
+        )

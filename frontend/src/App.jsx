@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity, Stethoscope, MessageCircle, Calendar, Search, ChevronRight, Send,
-  ArrowRight, Heart, Brain, Droplet, Wind, LogOut, Menu, AlertCircle, RefreshCw, FileText, UploadCloud, Salad, Dumbbell, Check
+  ArrowRight, Heart, Brain, Droplet, Wind, LogOut, Menu, AlertCircle, RefreshCw, FileText, UploadCloud, Salad, Dumbbell, Check, Users, UserRound
 } from "lucide-react";
 import { api } from "./api";
 import { C, FONTS, PulseLine, riskVisual, RiskWave, Button, Card, Badge, ErrorBanner } from "./ui";
 import Landing from "./Landing";
+import { DoctorOverview, DoctorAppointments, DoctorPatients, DoctorProfile } from "./Doctor";
 
 /* =====================================================================
    VIEW: AUTH (real API)
@@ -86,9 +87,9 @@ function Auth({ onAuthed }) {
 /* =====================================================================
    SHARED: APP SHELL
 ===================================================================== */
-function Shell({ view, goTo, children }) {
+function Shell({ view, goTo, children, navItems }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const nav = [
+  const patientNav = [
     { key: "dashboard", label: "Dashboard", icon: Activity },
     { key: "symptom-checker", label: "Symptom Checker", icon: Stethoscope },
     { key: "disease-risk", label: "Disease Risk", icon: Heart },
@@ -97,6 +98,7 @@ function Shell({ view, goTo, children }) {
     { key: "plan", label: "Lifestyle", icon: Salad },
     { key: "appointments", label: "Appointments", icon: Calendar },
   ];
+  const nav = navItems || patientNav;
   const signOut = () => { api.logout(); goTo("auth"); };
   return (
     <div className="min-h-screen ma-body" style={{ backgroundColor: C.paper }}>
@@ -137,6 +139,27 @@ function Shell({ view, goTo, children }) {
 /* =====================================================================
    DASHBOARD
 ===================================================================== */
+function NameCard({ onSaved }) {
+  const [name, setName] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true); setErr("");
+    try { onSaved(await api.updateMyProfile({ full_name: name.trim() })); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <Card className="p-5 mb-6">
+      <div className="ma-body text-sm font-medium mb-1" style={{ color: C.ink }}>What should we call you?</div>
+      <div className="ma-body text-xs mb-3" style={{ color: "#6E6B8A" }}>Your name is shown to doctors you book with.</div>
+      <ErrorBanner message={err} />
+      <div className="flex gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" className="ma-body flex-1 px-3 py-2 rounded-lg border outline-none text-sm" style={{ borderColor: C.mist }} />
+        <Button disabled={!name.trim() || busy} onClick={save}>{busy ? "..." : "Save"}</Button>
+      </div>
+    </Card>
+  );
+}
+
 function Dashboard({ goTo }) {
   const [profile, setProfile] = useState(null);
   const [risk, setRisk] = useState(null);
@@ -163,6 +186,8 @@ function Dashboard({ goTo }) {
         {profile?.full_name ? `Welcome back, ${profile.full_name.split(" ")[0]}` : "Welcome back"}
       </h1>
       <p className="ma-body text-sm mb-8" style={{ color: "#6E6B8A" }}>Here's where things stand today.</p>
+
+      {profile && !profile.full_name && <NameCard onSaved={setProfile} />}
 
       <Card className="p-6 mb-8">
         <div className="flex items-center justify-between mb-4">
@@ -905,7 +930,8 @@ function Appointments() {
    ROOT APP
 ===================================================================== */
 export default function App() {
-  const [view, setView] = useState(api.isLoggedIn() ? "dashboard" : "landing");
+  const home = () => (api.getRole() === "doctor" ? "d-overview" : "dashboard");
+  const [view, setView] = useState(api.isLoggedIn() ? home() : "landing");
   const goTo = (v) => setView(v);
 
   useEffect(() => {
@@ -916,7 +942,22 @@ export default function App() {
 
   const renderView = () => {
     if (view === "landing") return <Landing goTo={goTo} />;
-    if (view === "auth" || !api.isLoggedIn()) return <Auth onAuthed={() => setView("dashboard")} />;
+    if (view === "auth" || !api.isLoggedIn()) return <Auth onAuthed={() => setView(home())} />;
+    if (api.getRole() === "doctor") {
+      const doctorNav = [
+        { key: "d-overview", label: "Overview", icon: Activity },
+        { key: "d-patients", label: "Patients", icon: Users },
+        { key: "d-appointments", label: "Appointments", icon: Calendar },
+        { key: "d-profile", label: "Profile", icon: UserRound },
+      ];
+      const wrap = (el, v) => <Shell view={v} goTo={goTo} navItems={doctorNav}>{el}</Shell>;
+      switch (view) {
+        case "d-patients": return wrap(<DoctorPatients AnalysisView={AnalysisView} />, view);
+        case "d-appointments": return wrap(<DoctorAppointments />, view);
+        case "d-profile": return wrap(<DoctorProfile />, view);
+        default: return wrap(<DoctorOverview goTo={goTo} />, "d-overview");
+      }
+    }
     switch (view) {
       case "symptom-checker": return <Shell view={view} goTo={goTo}><SymptomChecker /></Shell>;
       case "disease-risk": return <Shell view={view} goTo={goTo}><DiseaseRisk /></Shell>;

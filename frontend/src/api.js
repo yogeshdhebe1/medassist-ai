@@ -28,9 +28,11 @@ export const api = {
   login: async (email, password) => {
     const d = await request("/auth/login", { method: "POST", auth: false, body: { email, password } });
     setToken(d.access_token);
+    try { localStorage.setItem("role", d.role || "patient"); } catch { /* ignore */ }
     return d;
   },
-  logout: () => setToken(null),
+  logout: () => { setToken(null); try { localStorage.removeItem("role"); } catch { /* ignore */ } },
+  getRole: () => { try { return localStorage.getItem("role") || "patient"; } catch { return "patient"; } },
   isLoggedIn: () => !!getToken(),
 
   getMyProfile: () => request("/patients/me"),
@@ -63,6 +65,16 @@ export const api = {
   getReportAnalysis: (id) => request(`/reports/${id}/analysis`),
   listMyAppointments: () => request("/appointments"),
   bookAppointment: (doctorId, scheduledAt, reason) => request("/appointments", { method: "POST", body: { doctor_id: doctorId, scheduled_at: scheduledAt, reason } }),
+
+  updateAppointmentStatus: (id, status) => request(`/appointments/${id}/status`, { method: "PATCH", body: { status } }),
+
+  // doctor
+  getDoctorProfile: () => request("/doctors/me"),
+  updateDoctorProfile: (body) => request("/doctors/me", { method: "PUT", body }),
+  listMyPatients: () => request("/doctors/me/patients"),
+  listPatientReports: (patientId) => request(`/reports/patient/${patientId}`),
+  listPatientNotes: (patientId) => request(`/doctors/me/patients/${patientId}/notes`),
+  addPatientNote: (patientId, note) => request("/doctors/me/patient-notes", { method: "POST", body: { patient_id: patientId, note } }),
 
   listNotifications: () => request("/notifications"),
   getUnreadCount: () => request("/notifications/unread-count"),

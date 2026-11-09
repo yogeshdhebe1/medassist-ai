@@ -65,3 +65,8 @@ class DoctorService:
 
         if not self.repo.is_assigned(doctor.id, patient.id):
             self.repo.assign_patient(doctor.id, patient.id)
+
+    def list_patient_notes(self, doctor_user_id: uuid.UUID, patient_id: uuid.UUID) -> list[PatientNote]:
+        doctor = self.get_or_create_profile(doctor_user_id)
+        self._assert_assigned(doctor, patient_id)
+        return self.repo.list_notes(doctor.id, patient_id)

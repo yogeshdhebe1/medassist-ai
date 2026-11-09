@@ -66,6 +66,15 @@ def add_patient_note(
     return DoctorService(db).add_patient_note(current_user.id, payload)
 
 
+@router.get("/me/patients/{patient_id}/notes", response_model=list[PatientNoteResponse])
+def list_patient_notes(
+    patient_id: uuid.UUID,
+    current_user: User = Depends(require_role("doctor")),
+    db: Session = Depends(get_db),
+):
+    return DoctorService(db).list_patient_notes(current_user.id, patient_id)
+
+
 @router.get("", response_model=list[DoctorPublicProfileResponse])
 def list_doctors(
     page: int = Query(default=1, ge=1),
